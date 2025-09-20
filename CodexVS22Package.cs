@@ -11,6 +11,7 @@ namespace CodexVS22
     [InstalledProductRegistration(Vsix.Name, Vsix.Description, Vsix.Version)]
     [ProvideToolWindow(typeof(MyToolWindow.Pane), Style = VsDockStyle.Tabbed, Window = WindowGuids.SolutionExplorer)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
+    [ProvideOptionPage(typeof(CodexOptions), "Codex", "General", 0, 0, true)]
     [Guid(PackageGuids.CodexVS22String)]
     public sealed class CodexVS22Package : ToolkitPackage
     {
@@ -19,6 +20,17 @@ namespace CodexVS22
             await this.RegisterCommandsAsync();
 
             this.RegisterToolWindows();
+
+            // Optionally open tool window on startup if configured
+            try
+            {
+                var options = (CodexOptions)GetDialogPage(typeof(CodexOptions));
+                if (options.OpenOnStartup)
+                {
+                    await MyToolWindow.ShowAsync();
+                }
+            }
+            catch { /* ignore option load errors */ }
         }
     }
 }
