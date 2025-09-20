@@ -85,7 +85,7 @@ namespace CodexVS22.Core
                 if (file.Equals("wsl.exe", StringComparison.OrdinalIgnoreCase))
                     args = "-- codex whoami";
                 else
-                    (file, args) = (file, "whoami");
+                    args = "whoami";
 
                 var psi = new ProcessStartInfo
                 {

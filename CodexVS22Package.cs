@@ -15,6 +15,7 @@ namespace CodexVS22
     [Guid(PackageGuids.CodexVS22String)]
     public sealed class CodexVS22Package : ToolkitPackage
     {
+        public static CodexOptions OptionsInstance { get; private set; }
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await this.RegisterCommandsAsync();
@@ -24,8 +25,8 @@ namespace CodexVS22
             // Optionally open tool window on startup if configured
             try
             {
-                var options = (CodexOptions)GetDialogPage(typeof(CodexOptions));
-                if (options.OpenOnStartup)
+                OptionsInstance = (CodexOptions)GetDialogPage(typeof(CodexOptions));
+                if (OptionsInstance.OpenOnStartup)
                 {
                     await MyToolWindow.ShowAsync();
                 }
