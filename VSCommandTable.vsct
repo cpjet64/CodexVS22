@@ -2,7 +2,6 @@
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
   <Extern href="stdidcmd.h"/>
   <Extern href="vsshlids.h"/>
-  <Include href="VSGlobals.vsct" />
   <Commands>
     <Groups>
       <Group guid="guidCodexVS22" id="ToolsGroup" priority="0x0100">
