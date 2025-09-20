@@ -13,7 +13,8 @@
              d:DesignHeight="300"
              d:DesignWidth="300"
              Name="MyToolWindow"
-             Loaded="OnLoaded">
+             Loaded="OnLoaded"
+             Unloaded="OnUnloaded">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />

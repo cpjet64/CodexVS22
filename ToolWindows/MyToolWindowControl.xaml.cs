@@ -31,6 +31,12 @@ namespace CodexVS22
             await _host.StartAsync(options, dir);
         }
 
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            _host?.Dispose();
+            _host = null;
+        }
+
         private async void HandleStdout(string line)
         {
             var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
