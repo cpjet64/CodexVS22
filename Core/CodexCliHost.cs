@@ -201,17 +201,29 @@ namespace CodexVS22.Core
             await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
         }
 
-        private static async Task LogInfoAsync(string message)
+        private static int _rateCount;
+        private static int _rateSecond;
+        private const int MaxPerSecond = 20;
+
+        private static async Task WriteThrottledAsync(string prefix, string message)
         {
+            var now = DateTime.Now;
+            if (_rateSecond != now.Second)
+            {
+                _rateSecond = now.Second;
+                _rateCount = 0;
+            }
+            if (_rateCount++ > MaxPerSecond)
+            {
+                // Drop excessive logs to keep VS responsive
+                return;
+            }
             var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
-            await pane.WriteLineAsync($"[info] {DateTime.Now:HH:mm:ss} {message}");
+            await pane.WriteLineAsync($"[{prefix}] {now:HH:mm:ss} {message}");
         }
 
-        private static async Task LogErrorAsync(string message)
-        {
-            var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
-            await pane.WriteLineAsync($"[err ] {DateTime.Now:HH:mm:ss} {message}");
-        }
+        private static Task LogInfoAsync(string message) => WriteThrottledAsync("info", message);
+        private static Task LogErrorAsync(string message) => WriteThrottledAsync("err ", message);
 
         public static string LastVersion { get; private set; }
         public static string LastRolloutPath { get; private set; }
