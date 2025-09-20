@@ -29,6 +29,7 @@ namespace CodexVS22
             var solPath = dte?.Solution?.FullName;
             var dir = !string.IsNullOrEmpty(solPath) ? Path.GetDirectoryName(solPath) : string.Empty;
             await _host.StartAsync(options, dir);
+            await _host.CheckAuthenticationAsync(options, dir);
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)

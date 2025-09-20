@@ -66,6 +66,46 @@ namespace CodexVS22.Core
             return true;
         }
 
+        public async Task CheckAuthenticationAsync(CodexOptions options, string workingDir)
+        {
+            try
+            {
+                var (file, args) = ResolveCli(options);
+                // Convert proto command to whoami for check when not using WSL
+                if (file.Equals("wsl.exe", StringComparison.OrdinalIgnoreCase))
+                    args = "-- codex whoami";
+                else
+                    (file, args) = (file, "whoami");
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir
+                };
+                using var p = Process.Start(psi);
+                var outText = await p.StandardOutput.ReadToEndAsync();
+                var errText = await p.StandardError.ReadToEndAsync();
+                p.WaitForExit(5000);
+                if (p.ExitCode != 0 || outText.Contains("not logged", StringComparison.OrdinalIgnoreCase))
+                {
+                    await LogErrorAsync("Codex CLI not authenticated. Run 'codex login' in a terminal.");
+                }
+                else
+                {
+                    await LogInfoAsync($"whoami: {outText.Trim()}");
+                }
+            }
+            catch (Exception ex)
+            {
+                await LogErrorAsync($"whoami check failed: {ex.Message}");
+            }
+        }
+
         public async Task SendAsync(string jsonLine)
         {
             try
@@ -157,4 +197,3 @@ namespace CodexVS22.Core
         }
     }
 }
-
