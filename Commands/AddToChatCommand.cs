@@ -11,6 +11,7 @@ namespace CodexVS22
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {
             await MyToolWindow.ShowAsync();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             var dte = await VS.GetServiceAsync<DTE, DTE2>();
             var sel = dte?.ActiveDocument?.Selection as TextSelection;
             var text = sel?.Text;
@@ -31,6 +32,7 @@ namespace CodexVS22
 
         private static bool HasSelection()
         {
+            ThreadHelper.ThrowIfNotOnUIThread();
             try
             {
                 var dte = (DTE2)Microsoft.VisualStudio.Shell.Package.GetGlobalService(typeof(DTE));

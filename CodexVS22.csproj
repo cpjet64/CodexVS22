@@ -85,6 +85,11 @@
     </VSCTCompile>
   </ItemGroup>
   <ItemGroup>
+    <VSCTInclude Include="VSGlobals.vsct">
+      <Parent>VSCommandTable.vsct</Parent>
+    </VSCTInclude>
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="ToolWindows\MyToolWindow.cs" />
     <Page Include="ToolWindows\MyToolWindowControl.xaml">
       <SubType>Designer</SubType>
@@ -108,6 +113,7 @@
     <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.507" ExcludeAssets="Runtime" />
     <!-- Remove meta SDK to avoid heavy transitive deps that conflict in VS 17.x -->
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.9.3168" />
+    <PackageReference Include="System.Text.Json" Version="5.0.2" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Options\CodexOptions.cs" />

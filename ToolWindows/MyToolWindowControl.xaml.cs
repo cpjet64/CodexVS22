@@ -9,6 +9,7 @@ using EnvDTE80;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
 using System.Text.Json;
+using Microsoft.VisualStudio.Shell;
 
 namespace CodexVS22
 {
@@ -30,6 +31,7 @@ namespace CodexVS22
             _host.OnStdoutLine += HandleStdout;
             _host.OnStderrLine += HandleStderr;
             var options = CodexVS22Package.OptionsInstance;
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             var dte = await VS.GetServiceAsync<DTE, DTE2>();
             var solPath = dte?.Solution?.FullName;
             var dir = !string.IsNullOrEmpty(solPath) ? Path.GetDirectoryName(solPath) : string.Empty;
