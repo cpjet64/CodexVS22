@@ -15,6 +15,9 @@ namespace CodexVS22.Core
         private StreamWriter _stdin;
         private CancellationTokenSource _cts;
         private string _lastResolved;
+        private CodexOptions _lastOptions;
+        private string _lastWorkingDir;
+        private bool _reconnected;
 
         public event Action<string> OnStdoutLine;
         public event Action<string> OnStderrLine;
@@ -24,6 +27,9 @@ namespace CodexVS22.Core
         {
             await EnsureDiagnosticsPaneAsync();
 
+            _lastOptions = options;
+            _lastWorkingDir = workingDir;
+            _reconnected = false;
             var (fileName, args) = ResolveCli(options);
             _lastResolved = $"{fileName} {args}";
             await LogInfoAsync($"Resolved CLI: {_lastResolved}");
@@ -120,6 +126,7 @@ namespace CodexVS22.Core
             catch (Exception ex)
             {
                 await LogErrorAsync($"Write error: {ex.Message}");
+                await TryReconnectAsync();
             }
         }
 
@@ -160,6 +167,15 @@ namespace CodexVS22.Core
             {
                 await LogErrorAsync($"Pump error: {ex.Message}");
             }
+        }
+
+        private async Task TryReconnectAsync()
+        {
+            if (_reconnected) return;
+            _reconnected = true;
+            await LogInfoAsync("Attempting one-shot reconnect...");
+            Dispose();
+            await StartAsync(_lastOptions, _lastWorkingDir);
         }
 
         private static (string fileName, string args) ResolveCli(CodexOptions options)
