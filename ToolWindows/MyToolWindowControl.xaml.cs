@@ -1,4 +1,5 @@
-﻿using System.IO;
+using System;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,6 +8,7 @@ using EnvDTE;
 using EnvDTE80;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
+using System.Text.Json;
 
 namespace CodexVS22
 {
@@ -66,10 +68,8 @@ namespace CodexVS22
                     });
                     break;
                 case EventKind.AgentMessage:
-                    // TODO: finalize assistant bubble
                     break;
                 case EventKind.TokenCount:
-                    // TODO: update token counters in footer
                     break;
                 case EventKind.StreamError:
                     await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
@@ -78,18 +78,18 @@ namespace CodexVS22
                     {
                         var result = MessageBox.Show("Apply patch from Codex?", "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
                         var approved = result == MessageBoxResult.Yes;
-                        var approval = $"{{\\\"id\\\":\\\"{evt.Id}\\\",\\\"ops\\\":[{{\\\"kind\\\":\\\"patch_approval\\\",\\\"approved\\\":{approved.ToString().ToLower()} }}]}}";
-                        await _host.SendAsync(approval);
+                        var approval = new { id = evt.Id, ops = new object[] { new { kind = "patch_approval", approved = approved } } };
+                        await _host.SendAsync(JsonSerializer.Serialize(approval));
                     }
                     break;
                 case EventKind.ExecApprovalRequest:
                     {
                         var cmd = TryGetString(evt.Raw, "command") ?? "(unknown)";
-                        var cwd = TryGetString(evt.Raw, "cwd") ?? "";
+                        var cwd = TryGetString(evt.Raw, "cwd") ?? string.Empty;
                         var result = MessageBox.Show($"Approve exec?\n{cmd}\nCWD: {cwd}", "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
                         var approved = result == MessageBoxResult.Yes;
-                        var approval = $"{{\"id\":\"{evt.Id}\",\"ops\":[{{\"kind\":\"exec_approval\",\"approved\":{approved.ToString().ToLower()} }}]}}";
-                        await _host.SendAsync(approval);
+                        var approval = new { id = evt.Id, ops = new object[] { new { kind = "exec_approval", approved = approved } } };
+                        await _host.SendAsync(JsonSerializer.Serialize(approval));
                     }
                     break;
                 case EventKind.ExecCommandBegin:
@@ -138,7 +138,6 @@ namespace CodexVS22
                     });
                     break;
                 default:
-                    // Ignore unknowns; keep UI responsive
                     break;
             }
         }
@@ -187,8 +186,8 @@ namespace CodexVS22
             var text = box?.Text?.Trim();
             if (string.IsNullOrEmpty(text)) return;
             var id = Guid.NewGuid().ToString();
-            var payload = $"{{\"id\":\"{id}\",\"ops\":[{{\"kind\":\"user_input\",\"text\":{System.Text.Json.JsonSerializer.Serialize(text)}}]}}";
-            await _host.SendAsync(payload);
+            var submission = new { id = id, ops = new object[] { new { kind = "user_input", text = text } } };
+            await _host.SendAsync(JsonSerializer.Serialize(submission));
             if (this.FindName("Transcript") is StackPanel t)
             {
                 t.Children.Add(new TextBlock { Text = text, Tag = "user", TextWrapping = TextWrapping.Wrap });
@@ -200,3 +199,4 @@ namespace CodexVS22
         }
     }
 }
+
