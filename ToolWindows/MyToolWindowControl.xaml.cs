@@ -1,13 +1,32 @@
-﻿using System.Windows;
+﻿using System.IO;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
+using Community.VisualStudio.Toolkit;
+using EnvDTE;
+using EnvDTE80;
+using CodexVS22.Core;
 
 namespace CodexVS22
 {
     public partial class MyToolWindowControl : UserControl
     {
+        private CodexCliHost _host;
         public MyToolWindowControl()
         {
             InitializeComponent();
+        }
+
+        private async void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            if (_host != null) return;
+            _host = new CodexCliHost();
+            var pkg = await VS.Services.GetPackageAsync<CodexVS22Package>();
+            var options = (CodexOptions)pkg.GetDialogPage(typeof(CodexOptions));
+            var dte = await VS.GetServiceAsync<DTE, DTE2>();
+            var solPath = dte?.Solution?.FullName;
+            var dir = !string.IsNullOrEmpty(solPath) ? Path.GetDirectoryName(solPath) : string.Empty;
+            await _host.StartAsync(options, dir);
         }
 
         public void AppendSelectionToInput(string text)
