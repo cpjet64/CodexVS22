@@ -60,7 +60,13 @@ namespace CodexVS22
                     await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
                     break;
                 case EventKind.TaskComplete:
-                    // TODO: re-enable Send button
+                    _ = Dispatcher.InvokeAsync(() =>
+                    {
+                        var btn = this.FindName("SendButton") as Button;
+                        var status = this.FindName("StatusText") as TextBlock;
+                        if (btn != null) btn.IsEnabled = true;
+                        if (status != null) status.Text = string.Empty;
+                    });
                     break;
                 default:
                     // Ignore unknowns; keep UI responsive
@@ -102,6 +108,10 @@ namespace CodexVS22
             var id = Guid.NewGuid().ToString();
             var payload = $"{{\"id\":\"{id}\",\"ops\":[{{\"kind\":\"user_input\",\"text\":{System.Text.Json.JsonSerializer.Serialize(text)}}]}}";
             await _host.SendAsync(payload);
+            var btn = this.FindName("SendButton") as Button;
+            var status = this.FindName("StatusText") as TextBlock;
+            if (btn != null) btn.IsEnabled = false;
+            if (status != null) status.Text = "Streaming...";
         }
     }
 }

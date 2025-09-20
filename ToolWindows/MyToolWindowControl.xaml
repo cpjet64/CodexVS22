@@ -30,7 +30,10 @@
             </StackPanel>
         </ScrollViewer>
         <DockPanel Grid.Row="2" Margin="6">
-            <Button Content="Send" Width="80" Height="28" DockPanel.Dock="Right" Margin="4,0,0,0" Click="OnSendClick" />
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <Button Name="SendButton" Content="Send" Width="80" Height="28" Margin="4,0,0,0" Click="OnSendClick" />
+            </StackPanel>
             <TextBox Name="InputBox" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
         </DockPanel>
     </Grid>
