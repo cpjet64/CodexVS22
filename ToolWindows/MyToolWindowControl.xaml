@@ -24,11 +24,25 @@
         <DockPanel Grid.Row="0" Margin="6">
             <TextBlock Text="Codex" FontWeight="Bold" />
         </DockPanel>
-        <ScrollViewer Grid.Row="1" Margin="6" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-                <TextBlock Text="Welcome to Codex for Visual Studio" />
-            </StackPanel>
-        </ScrollViewer>
+        <Grid Grid.Row="1" Margin="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="Welcome to Codex for Visual Studio" />
+                </StackPanel>
+            </ScrollViewer>
+            <Border Grid.Row="1" Margin="0,8,0,0" BorderBrush="Gray" BorderThickness="1" Visibility="Collapsed" Name="ExecContainer">
+                <DockPanel>
+                    <TextBlock Text="Exec Console" FontWeight="Bold" Margin="4" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Height="160">
+                        <TextBox Name="ExecConsole" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
         <DockPanel Grid.Row="2" Margin="6">
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                 <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="0,0,8,0" />

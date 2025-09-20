@@ -59,6 +59,36 @@ namespace CodexVS22
                 case EventKind.StreamError:
                     await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
                     break;
+                case EventKind.ExecCommandBegin:
+                    _ = Dispatcher.InvokeAsync(() =>
+                    {
+                        if (this.FindName("ExecContainer") is FrameworkElement c) c.Visibility = Visibility.Visible;
+                        if (this.FindName("ExecConsole") is TextBox t)
+                        {
+                            t.Text += "\n$ exec started\n";
+                        }
+                    });
+                    break;
+                case EventKind.ExecCommandOutputDelta:
+                    _ = Dispatcher.InvokeAsync(() =>
+                    {
+                        if (this.FindName("ExecConsole") is TextBox t)
+                        {
+                            t.AppendText(evt.Raw.ToString());
+                            t.AppendText("\n");
+                            t.ScrollToEnd();
+                        }
+                    });
+                    break;
+                case EventKind.ExecCommandEnd:
+                    _ = Dispatcher.InvokeAsync(() =>
+                    {
+                        if (this.FindName("ExecConsole") is TextBox t)
+                        {
+                            t.Text += "\n$ exec finished\n";
+                        }
+                    });
+                    break;
                 case EventKind.TaskComplete:
                     _ = Dispatcher.InvokeAsync(() =>
                     {
