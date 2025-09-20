@@ -62,7 +62,10 @@ namespace CodexVS22.Core
             }
             catch (Exception ex)
             {
-                await LogErrorAsync($"Start error: {ex.Message}");
+                var msg = ex.Message;
+                await LogErrorAsync($"Start error: {msg}");
+                await VS.Notifications.ShowErrorAsync(
+                    "Failed to start Codex CLI. Configure Codex path in Tools → Options → Codex, or install the CLI.");
                 return false;
             }
 
