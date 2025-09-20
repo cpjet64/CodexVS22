@@ -31,39 +31,39 @@ Execution Order
 - [x] [T1.12] Document prerequisites in README and verify steps manually.
 
 ## T2. Codex CLI process management
-- [ ] [T2.1] Resolve CLI path from Options or PATH; log the resolved path.
-- [ ] [T2.2] Implement WSL fallback using `wsl.exe -- codex proto` when opted in.
-- [ ] [T2.3] Start `codex proto` as a long-lived process in the solution directory.
-- [ ] [T2.4] Read stdout line-by-line; treat each line as a JSON event envelope.
-- [ ] [T2.5] Write submissions to stdin; flush after each JSON line.
-- [ ] [T2.6] Pump stderr to a Diagnostics tab with timestamps and level hints.
-- [ ] [T2.7] Implement graceful shutdown on tool window close or VS shutdown.
-- [ ] [T2.8] Add whoami check; if unauthenticated, run `codex login` and report.
-- [ ] [T2.9] Add a one-shot reconnect on broken pipe; surface status in UI.
-- [ ] [T2.10] Record CLI version and rollout path on startup for telemetry.
-- [ ] [T2.11] Throttle logs to avoid flooding ActivityLog; cap rate per second.
-- [ ] [T2.12] Post-test: simulate CLI absence and bad path; show friendly errors.
+- [x] [T2.1] Resolve CLI path from Options or PATH; log the resolved path.
+- [x] [T2.2] Implement WSL fallback using `wsl.exe -- codex proto` when opted in.
+- [x] [T2.3] Start `codex proto` as a long-lived process in the solution directory.
+- [x] [T2.4] Read stdout line-by-line; treat each line as a JSON event envelope.
+- [x] [T2.5] Write submissions to stdin; flush after each JSON line.
+- [x] [T2.6] Pump stderr to a Diagnostics tab with timestamps and level hints.
+- [x] [T2.7] Implement graceful shutdown on tool window close or VS shutdown.
+- [x] [T2.8] Add whoami check; if unauthenticated, run `codex login` and report.
+- [x] [T2.9] Add a one-shot reconnect on broken pipe; surface status in UI.
+- [x] [T2.10] Record CLI version and rollout path on startup for telemetry.
+- [x] [T2.11] Throttle logs to avoid flooding ActivityLog; cap rate per second.
+- [x] [T2.12] Post-test: simulate CLI absence and bad path; show friendly errors.
 
 ## T3. Protocol envelopes and correlation
-- [ ] [T3.1] Define Submission and Op models; Event and EventMsg models with tolerant parsing.
-- [ ] [T3.2] Create a UUID helper for Submission.id values.
-- [ ] [T3.3] Maintain an in-flight map id→turn; remove on TaskComplete or error.
-- [ ] [T3.4] Handle SessionConfigured first; update session header and status bar.
+- [x] [T3.1] Define Submission and Op models; Event and EventMsg models with tolerant parsing.
+- [x] [T3.2] Create a UUID helper for Submission.id values.
+- [x] [T3.3] Maintain an in-flight map id→turn; remove on TaskComplete or error.
+- [x] [T3.4] Handle SessionConfigured first; update session header and status bar.
 - [ ] [T3.5] Stream AgentMessageDelta; finalize on AgentMessage.
 - [ ] [T3.6] Capture TokenCount and show usage counters in the footer.
 - [ ] [T3.7] Render StreamError as non-fatal banner; allow retry button.
-- [ ] [T3.8] Log unknown EventMsg kinds without crashing; keep UI responsive.
+- [x] [T3.8] Log unknown EventMsg kinds without crashing; keep UI responsive.
 - [ ] [T3.9] Add compact/no-op submission for heartbeat if CLI supports it.
 - [ ] [T3.10] Unit-test correlation with canned event streams.
-- [ ] [T3.11] Persist last rollout_path observed for diagnostics.
+- [x] [T3.11] Persist last rollout_path observed for diagnostics.
 - [ ] [T3.12] Post-test with parallel turns and ensure correct routing.
 
 ## T4. Tool Window chat UI
-- [ ] [T4.1] Create WPF Tool Window layout with header, transcript, and input box.
+- [x] [T4.1] Create WPF Tool Window layout with header, transcript, and input box.
 - [ ] [T4.2] Add model and reasoning selectors; persist choices to Options.
-- [ ] [T4.3] Submit user_input ops from Send button and Ctrl+Enter.
+- [x] [T4.3] Submit user_input ops from Send button and Ctrl+Enter.
 - [ ] [T4.4] Append user bubbles; stream assistant tokens into a live bubble.
-- [ ] [T4.5] Disable Send while a turn is active; re-enable on TaskComplete.
+- [x] [T4.5] Disable Send while a turn is active; re-enable on TaskComplete.
 - [ ] [T4.6] Add Clear Chat with confirmation dialog to avoid accidental loss.
 - [ ] [T4.7] Add Copy to Clipboard per message and Copy All in transcript.
 - [ ] [T4.8] Add accessibility labels and keyboard navigation for controls.
@@ -73,11 +73,11 @@ Execution Order
 - [ ] [T4.12] Post-test: long inputs, non-ASCII, and paste flows behave correctly.
 
 ## T5. Approvals (exec and patch) UX
-- [ ] [T5.1] Add approval policy toggle: Chat, Agent, Agent (Full Access).
-- [ ] [T5.2] On ExecApprovalRequest show modal with command, cwd, and risk note.
-- [ ] [T5.3] Send ExecApproval with decision; remember per-session rule if chosen.
-- [ ] [T5.4] On ApplyPatchApprovalRequest show file list and summary of changes.
-- [ ] [T5.5] Send PatchApproval with decision and optional rationale.
+- [x] [T5.1] Add approval policy toggle: Chat, Agent, Agent (Full Access).
+- [x] [T5.2] On ExecApprovalRequest show modal with command, cwd, and risk note.
+- [x] [T5.3] Send ExecApproval with decision; remember per-session rule if chosen.
+- [x] [T5.4] On ApplyPatchApprovalRequest show file list and summary of changes.
+- [x] [T5.5] Send PatchApproval with decision and optional rationale.
 - [ ] [T5.6] Provide 'Reset approvals' to clear remembered session decisions.
 - [ ] [T5.7] Add a warning banner when in Full Access mode.
 - [ ] [T5.8] Log denied approvals with reason code and context.
@@ -87,7 +87,7 @@ Execution Order
 - [ ] [T5.12] Post-test: repeated prompts honor remembered decisions.
 
 ## T6. Diff preview and apply
-- [ ] [T6.1] Parse TurnDiff unified diff into file→hunks data structures.
+- [x] [T6.1] Parse TurnDiff unified diff into file→hunks data structures.
 - [ ] [T6.2] Render side-by-side diffs using Visual Studio diff services.
 - [ ] [T6.3] Show a tree of files with checkboxes to include/exclude patches.
 - [ ] [T6.4] Apply edits using ITextBuffer / ITextEdit transactions per file.
@@ -101,9 +101,9 @@ Execution Order
 - [ ] [T6.12] Ensure edits respect read-only files and source control locks.
 
 ## T7. Exec console
-- [ ] [T7.1] Create a console panel for ExecCommandBegin with command and cwd header.
-- [ ] [T7.2] Append ExecCommandOutputDelta chunks to the console view.
-- [ ] [T7.3] On ExecCommandEnd show exit code, duration, and summary line.
+- [x] [T7.1] Create a console panel for ExecCommandBegin with command and cwd header.
+- [x] [T7.2] Append ExecCommandOutputDelta chunks to the console view.
+- [x] [T7.3] On ExecCommandEnd show exit code, duration, and summary line.
 - [ ] [T7.4] Add Cancel action if the CLI supports aborting the command.
 - [ ] [T7.5] Implement basic ANSI color interpretation for readability.
 - [ ] [T7.6] Add Copy All and Clear Output actions on the console.
