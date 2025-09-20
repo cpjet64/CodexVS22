@@ -23,6 +23,7 @@
         </Grid.RowDefinitions>
         <DockPanel Grid.Row="0" Margin="6">
             <TextBlock Text="Codex" FontWeight="Bold" />
+            <Button Content="Clear" DockPanel.Dock="Right" Click="OnClearClick" />
         </DockPanel>
         <Grid Grid.Row="1" Margin="6">
             <Grid.RowDefinitions>
@@ -30,7 +31,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
-                <StackPanel>
+                <StackPanel Name="Transcript">
                     <TextBlock Text="Welcome to Codex for Visual Studio" />
                 </StackPanel>
             </ScrollViewer>

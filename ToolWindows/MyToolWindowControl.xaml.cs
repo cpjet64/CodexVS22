@@ -48,7 +48,22 @@ namespace CodexVS22
                     CodexVS22.Core.CodexCliHost.LastRolloutPath = TryGetString(evt.Raw, "rollout_path");
                     break;
                 case EventKind.AgentMessageDelta:
-                    // TODO: stream token delta into current assistant bubble
+                    _ = Dispatcher.InvokeAsync(() =>
+                    {
+                        if (this.FindName("Transcript") is StackPanel t)
+                        {
+                            TextBlock tb = null;
+                            if (t.Children.Count > 0)
+                                tb = t.Children[t.Children.Count - 1] as TextBlock;
+                            if (tb == null || !object.Equals(tb.Tag, "assistant"))
+                            {
+                                tb = new TextBlock { Text = string.Empty, Tag = "assistant", TextWrapping = TextWrapping.Wrap };
+                                t.Children.Add(tb);
+                            }
+                            var delta = TryGetString(evt.Raw, "text_delta") ?? string.Empty;
+                            tb.Text += delta;
+                        }
+                    });
                     break;
                 case EventKind.AgentMessage:
                     // TODO: finalize assistant bubble
@@ -134,6 +149,18 @@ namespace CodexVS22
             await pane.WriteLineAsync($"[stderr] {line}");
         }
 
+        private void OnClearClick(object sender, RoutedEventArgs e)
+        {
+            if (MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                if (this.FindName("Transcript") is StackPanel t)
+                {
+                    t.Children.Clear();
+                }
+                if (this.FindName("InputBox") is TextBox box) box.Clear();
+            }
+        }
+
         private static string TryGetString(System.Text.Json.JsonElement el, string name)
         {
             try { return el.TryGetProperty(name, out var v) ? v.GetString() : null; } catch { return null; }
@@ -162,6 +189,10 @@ namespace CodexVS22
             var id = Guid.NewGuid().ToString();
             var payload = $"{{\"id\":\"{id}\",\"ops\":[{{\"kind\":\"user_input\",\"text\":{System.Text.Json.JsonSerializer.Serialize(text)}}]}}";
             await _host.SendAsync(payload);
+            if (this.FindName("Transcript") is StackPanel t)
+            {
+                t.Children.Add(new TextBlock { Text = text, Tag = "user", TextWrapping = TextWrapping.Wrap });
+            }
             var btn = this.FindName("SendButton") as Button;
             var status = this.FindName("StatusText") as TextBlock;
             if (btn != null) btn.IsEnabled = false;
