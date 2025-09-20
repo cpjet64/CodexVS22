@@ -69,6 +69,7 @@ namespace CodexVS22.Core
             _ = Task.Run(() => PumpAsync(_proc.StandardOutput, _cts.Token, isErr: false));
             _ = Task.Run(() => PumpAsync(_proc.StandardError, _cts.Token, isErr: true));
             OnInfo?.Invoke("codex started");
+            _ = Task.Run(() => CaptureVersionAsync(options, workingDir));
             return true;
         }
 
@@ -210,6 +211,41 @@ namespace CodexVS22.Core
         {
             var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
             await pane.WriteLineAsync($"[err ] {DateTime.Now:HH:mm:ss} {message}");
+        }
+
+        public static string LastVersion { get; private set; }
+        public static string LastRolloutPath { get; private set; }
+
+        private async Task CaptureVersionAsync(CodexOptions options, string workingDir)
+        {
+            try
+            {
+                var (file, args) = ResolveCli(options);
+                if (file.Equals("wsl.exe", StringComparison.OrdinalIgnoreCase))
+                    args = "-- codex --version";
+                else
+                    args = "--version";
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir
+                };
+                using var p = Process.Start(psi);
+                var outText = await p.StandardOutput.ReadToEndAsync();
+                p.WaitForExit(5000);
+                LastVersion = outText.Trim();
+                await LogInfoAsync($"CLI version: {LastVersion}");
+                // If event stream includes rollout_path later, capture it there (T3.11)
+            }
+            catch (Exception ex)
+            {
+                await LogErrorAsync($"version check failed: {ex.Message}");
+            }
         }
     }
 }
