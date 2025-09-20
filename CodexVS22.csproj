@@ -85,11 +85,6 @@
     </VSCTCompile>
   </ItemGroup>
   <ItemGroup>
-    <VSCTInclude Include="VSGlobals.vsct">
-      <Parent>VSCommandTable.vsct</Parent>
-    </VSCTInclude>
-  </ItemGroup>
-  <ItemGroup>
     <Compile Include="ToolWindows\MyToolWindow.cs" />
     <Page Include="ToolWindows\MyToolWindowControl.xaml">
       <SubType>Designer</SubType>
