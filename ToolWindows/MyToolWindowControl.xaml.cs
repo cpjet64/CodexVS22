@@ -10,9 +10,18 @@ namespace CodexVS22
             InitializeComponent();
         }
 
-        private void button1_Click(object sender, RoutedEventArgs e)
+        public void AppendSelectionToInput(string text)
         {
-            VS.MessageBox.Show("CodexVS22", "Button clicked");
+            if (string.IsNullOrWhiteSpace(text)) return;
+            var box = this.FindName("InputBox") as TextBox;
+            if (box != null)
+            {
+                if (!string.IsNullOrEmpty(box.Text))
+                    box.Text += "\n";
+                box.Text += text;
+                box.Focus();
+                box.CaretIndex = box.Text.Length;
+            }
         }
     }
 }

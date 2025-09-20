@@ -1,6 +1,6 @@
 ﻿namespace CodexVS22
 {
-    [Command(PackageIds.MyCommand)]
+    [Command(PackageIds.OpenCodexCommand)]
     internal sealed class MyToolWindowCommand : BaseCommand<MyToolWindowCommand>
     {
         protected override Task ExecuteAsync(OleMenuCmdEventArgs e)

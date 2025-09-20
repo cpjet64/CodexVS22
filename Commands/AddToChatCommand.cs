@@ -1,47 +1,45 @@
-using System;
-using System.ComponentModel.Design;
 using System.Threading.Tasks;
+using Community.VisualStudio.Toolkit;
 using EnvDTE;
 using EnvDTE80;
-using Microsoft.VisualStudio.Shell;
 
-namespace CodexVs.Commands {
-  internal sealed class AddToChatCommand {
-    public const int CommandId = 0x0101;
-    public static readonly Guid CommandSet = new Guid("e7bfdbbf-a171-4857-baf7-8ef931e6dccf");
-    private readonly AsyncPackage _package;
-    private AddToChatCommand(AsyncPackage package, OleMenuCommandService commandService) {
-      _package = package;
-      var id = new CommandID(CommandSet, CommandId);
-      var cmd = new OleMenuCommand(async (s,e) => await ExecuteAsync(), id);
-      cmd.BeforeQueryStatus += OnBeforeQueryStatus;
-      commandService.AddCommand(cmd);
+namespace CodexVS22
+{
+    [Command(PackageIds.AddToChatCommand)]
+    internal sealed class AddToChatCommand : BaseCommand<AddToChatCommand>
+    {
+        protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
+        {
+            await MyToolWindow.ShowAsync();
+            var dte = await VS.GetServiceAsync<DTE, DTE2>();
+            var sel = dte?.ActiveDocument?.Selection as TextSelection;
+            var text = sel?.Text;
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            // Forward selection into the tool window input box
+            if (MyToolWindow.Instance?.Content is MyToolWindowControl ctrl)
+            {
+                ctrl.AppendSelectionToInput(text);
+            }
+        }
+
+        protected override void BeforeQueryStatus(EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            Command.Visible = Command.Enabled = HasSelection();
+        }
+
+        private static bool HasSelection()
+        {
+            try
+            {
+                var dte = (DTE2)Package.GetGlobalService(typeof(DTE));
+                var sel = dte?.ActiveDocument?.Selection as TextSelection;
+                return sel != null && !string.IsNullOrEmpty(sel.Text);
+            }
+            catch { return false; }
+        }
     }
-    public static async Task InitializeAsync(AsyncPackage package) {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var mcs = await package.GetServiceAsync(typeof(IMenuCommandService)) as OleMenuCommandService;
-      _ = new AddToChatCommand(package, mcs);
-    }
-    private void OnBeforeQueryStatus(object sender, EventArgs e) {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      var dte = (DTE2)Package.GetGlobalService(typeof(DTE));
-      var cmd = (OleMenuCommand)sender;
-      try {
-        var sel = dte.ActiveDocument?.Selection as TextSelection;
-        cmd.Visible = cmd.Enabled = sel != null && !string.IsNullOrEmpty(sel.Text);
-      } catch { cmd.Visible = cmd.Enabled = false; }
-    }
-    private async Task ExecuteAsync() {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var dte = (DTE2)Package.GetGlobalService(typeof(DTE));
-      var sel = dte.ActiveDocument?.Selection as TextSelection;
-      var text = sel?.Text;
-      if (string.IsNullOrWhiteSpace(text)) return;
-      var req = System.Text.Json.JsonSerializer.Serialize(new {
-        jsonrpc = "2.0", id = Guid.NewGuid().ToString(), method = "UserMessage",
-        @params = new { text = text }
-      });
-      await Core.CodexProcessService.Instance.SendAsync(req);
-    }
-  }
 }
+

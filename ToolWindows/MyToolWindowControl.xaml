@@ -14,15 +14,21 @@
              d:DesignWidth="300"
              Name="MyToolWindow">
     <Grid>
-        <StackPanel Orientation="Vertical">
-            <Label x:Name="lblHeadline"
-                   Margin="10"
-                   HorizontalAlignment="Center">Title</Label>
-            <Button Content="Click me!"
-                    Click="button1_Click"
-                    Width="120"
-                    Height="80"
-                    Name="button1" />
-        </StackPanel>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" Margin="6">
+            <TextBlock Text="Codex" FontWeight="Bold" />
+        </DockPanel>
+        <ScrollViewer Grid.Row="1" Margin="6" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="Welcome to Codex for Visual Studio" />
+            </StackPanel>
+        </ScrollViewer>
+        <DockPanel Grid.Row="2" Margin="6">
+            <TextBox Name="InputBox" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
+        </DockPanel>
     </Grid>
 </UserControl>

@@ -20,6 +20,10 @@ namespace CodexVS22
     /// </summary>
     internal sealed partial class PackageIds
     {
-        public const int MyCommand = 0x0100;
+        public const int OpenCodexCommand = 0x0100;
+        public const int AddToChatCommand = 0x0101;
+        public const int DiagnosticsCommand = 0x0102;
+        public const int ToolsGroup = 0x1000;
+        public const int EditorContextGroup = 0x1001;
     }
 }
