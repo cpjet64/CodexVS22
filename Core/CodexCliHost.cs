@@ -64,8 +64,8 @@ namespace CodexVS22.Core
             {
                 var msg = ex.Message;
                 await LogErrorAsync($"Start error: {msg}");
-                await VS.Notifications.ShowErrorAsync(
-                    "Failed to start Codex CLI. Configure Codex path in Tools → Options → Codex, or install the CLI.");
+                await VS.StatusBar.ShowMessageAsync(
+                    "Codex: Failed to start CLI. Configure path in Tools → Options → Codex.");
                 return false;
             }
 
@@ -101,7 +101,7 @@ namespace CodexVS22.Core
                 var outText = await p.StandardOutput.ReadToEndAsync();
                 var errText = await p.StandardError.ReadToEndAsync();
                 p.WaitForExit(5000);
-                if (p.ExitCode != 0 || outText.Contains("not logged", StringComparison.OrdinalIgnoreCase))
+                if (p.ExitCode != 0 || outText.IndexOf("not logged", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     await LogErrorAsync("Codex CLI not authenticated. Run 'codex login' in a terminal.");
                 }
@@ -229,7 +229,7 @@ namespace CodexVS22.Core
         private static Task LogErrorAsync(string message) => WriteThrottledAsync("err ", message);
 
         public static string LastVersion { get; private set; }
-        public static string LastRolloutPath { get; private set; }
+        public static string LastRolloutPath { get; set; }
 
         private async Task CaptureVersionAsync(CodexOptions options, string workingDir)
         {

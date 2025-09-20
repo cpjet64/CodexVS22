@@ -20,14 +20,16 @@ namespace CodexVS22
             InitializeComponent();
         }
 
+        public static MyToolWindowControl Current { get; private set; }
+
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             if (_host != null) return;
+            Current = this;
             _host = new CodexCliHost();
             _host.OnStdoutLine += HandleStdout;
             _host.OnStderrLine += HandleStderr;
-            var pkg = await VS.Services.GetPackageAsync<CodexVS22Package>();
-            var options = (CodexOptions)pkg.GetDialogPage(typeof(CodexOptions));
+            var options = CodexVS22Package.OptionsInstance;
             var dte = await VS.GetServiceAsync<DTE, DTE2>();
             var solPath = dte?.Solution?.FullName;
             var dir = !string.IsNullOrEmpty(solPath) ? Path.GetDirectoryName(solPath) : string.Empty;
@@ -39,6 +41,7 @@ namespace CodexVS22
         {
             _host?.Dispose();
             _host = null;
+            if (Current == this) Current = null;
         }
 
         private async void HandleStdout(string line)
@@ -72,11 +75,11 @@ namespace CodexVS22
                 case EventKind.TokenCount:
                     break;
                 case EventKind.StreamError:
-                    await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
+                    await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
                     break;
                 case EventKind.ApplyPatchApprovalRequest:
                     {
-                        var result = MessageBox.Show("Apply patch from Codex?", "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        var result = System.Windows.MessageBox.Show("Apply patch from Codex?", "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
                         var approved = result == MessageBoxResult.Yes;
                         var approval = new { id = evt.Id, ops = new object[] { new { kind = "patch_approval", approved = approved } } };
                         await _host.SendAsync(JsonSerializer.Serialize(approval));
@@ -86,7 +89,7 @@ namespace CodexVS22
                     {
                         var cmd = TryGetString(evt.Raw, "command") ?? "(unknown)";
                         var cwd = TryGetString(evt.Raw, "cwd") ?? string.Empty;
-                        var result = MessageBox.Show($"Approve exec?\n{cmd}\nCWD: {cwd}", "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        var result = System.Windows.MessageBox.Show($"Approve exec?\n{cmd}\nCWD: {cwd}", "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
                         var approved = result == MessageBoxResult.Yes;
                         var approval = new { id = evt.Id, ops = new object[] { new { kind = "exec_approval", approved = approved } } };
                         await _host.SendAsync(JsonSerializer.Serialize(approval));
@@ -150,7 +153,7 @@ namespace CodexVS22
 
         private void OnClearClick(object sender, RoutedEventArgs e)
         {
-            if (MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            if (System.Windows.MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 if (this.FindName("Transcript") is StackPanel t)
                 {
@@ -199,4 +202,3 @@ namespace CodexVS22
         }
     }
 }
-

@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.Shell;
 
 namespace CodexVS22
 {
+    [System.Runtime.InteropServices.ComVisible(true)]
     public class CodexOptions : DialogPage
     {
         public enum ApprovalMode

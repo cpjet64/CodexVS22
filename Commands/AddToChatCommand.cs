@@ -18,10 +18,9 @@ namespace CodexVS22
                 return;
 
             // Forward selection into the tool window input box
-            if (MyToolWindow.Instance?.Content is MyToolWindowControl ctrl)
-            {
+            var ctrl = MyToolWindowControl.Current;
+            if (ctrl != null)
                 ctrl.AppendSelectionToInput(text);
-            }
         }
 
         protected override void BeforeQueryStatus(EventArgs e)
@@ -34,7 +33,7 @@ namespace CodexVS22
         {
             try
             {
-                var dte = (DTE2)Package.GetGlobalService(typeof(DTE));
+                var dte = (DTE2)Microsoft.VisualStudio.Shell.Package.GetGlobalService(typeof(DTE));
                 var sel = dte?.ActiveDocument?.Selection as TextSelection;
                 return sel != null && !string.IsNullOrEmpty(sel.Text);
             }
@@ -42,4 +41,3 @@ namespace CodexVS22
         }
     }
 }
-
