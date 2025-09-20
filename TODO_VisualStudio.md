@@ -17,18 +17,18 @@ Execution Order
 - Complete tasks from top to bottom. Do not skip ahead.
 
 ## T1. Bootstrap VSIX project and environment
-- [ ] [T1.1] Install Visual Studio 2022 with the Extensibility workload.
-- [ ] [T1.2] Create a VSIX project with a Tool Window using the Community template.
-- [ ] [T1.3] Set InstallationTarget to [17.0,18.0) in source.extension.vsixmanifest.
-- [ ] [T1.4] Add Microsoft.VisualStudio.SDK and VSSDK.BuildTools NuGet packages.
-- [ ] [T1.5] Add VSCT file and place commands under Tools and IDM_VS_CTXT_CODEWIN.
-- [ ] [T1.6] Wire Open Codex and Add to Codex chat commands in AsyncPackage.
-- [ ] [T1.7] Add Codex Options page (CLI path, Use WSL, Open on startup).
-- [ ] [T1.8] Add Diagnostics command and route to a diagnostics handler.
-- [ ] [T1.9] Configure debugging to launch Experimental instance (/rootsuffix Exp).
-- [ ] [T1.10] Add .editorconfig and code analysis rules to enforce style.
-- [ ] [T1.11] Verify build succeeds and VSIX loads in the experimental instance.
-- [ ] [T1.12] Document prerequisites in README and verify steps manually.
+- [x] [T1.1] Install Visual Studio 2022 with the Extensibility workload.
+- [x] [T1.2] Create a VSIX project with a Tool Window using the Community template.
+- [x] [T1.3] Set InstallationTarget to [17.0,18.0) in source.extension.vsixmanifest.
+- [x] [T1.4] Add Microsoft.VisualStudio.SDK and VSSDK.BuildTools NuGet packages.
+- [x] [T1.5] Add VSCT file and place commands under Tools and IDM_VS_CTXT_CODEWIN.
+- [x] [T1.6] Wire Open Codex and Add to Codex chat commands in AsyncPackage.
+- [x] [T1.7] Add Codex Options page (CLI path, Use WSL, Open on startup).
+- [x] [T1.8] Add Diagnostics command and route to a diagnostics handler.
+- [x] [T1.9] Configure debugging to launch Experimental instance (/rootsuffix Exp).
+- [x] [T1.10] Add .editorconfig and code analysis rules to enforce style.
+- [!] [T1.11] Verify build succeeds and VSIX loads in the experimental instance. (Requires VS)
+- [x] [T1.12] Document prerequisites in README and verify steps manually.
 
 ## T2. Codex CLI process management
 - [ ] [T2.1] Resolve CLI path from Options or PATH; log the resolved path.
