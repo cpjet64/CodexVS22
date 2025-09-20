@@ -106,21 +106,11 @@
   <ItemGroup>
     <PackageReference Include="Community.VisualStudio.VSCT" Version="16.0.29.6" PrivateAssets="all" />
     <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.507" ExcludeAssets="Runtime" />
-    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.10.40171" />
+    <!-- Remove meta SDK to avoid heavy transitive deps that conflict in VS 17.x -->
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.9.3168" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Update="System.Collections.Immutable" ExcludeAssets="all" />
-    <PackageReference Update="System.Reflection.Metadata" ExcludeAssets="all" />
-    <PackageReference Update="Microsoft.ServiceHub.Framework" ExcludeAssets="all" />
-  </ItemGroup>
-  <ItemGroup>
     <Compile Include="Options\CodexOptions.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <Reference Remove="System.Collections.Immutable" />
-    <Reference Remove="System.Reflection.Metadata" />
-    <Reference Remove="Microsoft.ServiceHub.Framework" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
