@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+  <Commands>
+    <Groups>
+      <Group guid="guidCodexCmdSet" id="ToolsGroup" priority="0x0100">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+      </Group>
+      <Group guid="guidCodexCmdSet" id="EditorContextGroup" priority="0x0200">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
+      </Group>
+    </Groups>
+    <Buttons>
+      <Button guid="guidCodexCmdSet" id="OpenCodexCommand" priority="0x0100" type="Button">
+        <Parent guid="guidCodexCmdSet" id="ToolsGroup"/>
+        <Strings><ButtonText>Open Codex</ButtonText></Strings>
+      </Button>
+      <Button guid="guidCodexCmdSet" id="AddToChatCommand" priority="0x0101" type="Button">
+        <Parent guid="guidCodexCmdSet" id="EditorContextGroup"/>
+        <Strings><ButtonText>Add to Codex chat</ButtonText></Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+  <Symbols>
+    <GuidSymbol name="guidCodexCmdSet" value="e7bfdbbf-a171-4857-baf7-8ef931e6dccf">
+      <IDSymbol name="ToolsGroup" value="0x1000"/>
+      <IDSymbol name="EditorContextGroup" value="0x1001"/>
+      <IDSymbol name="OpenCodexCommand" value="0x0100"/>
+      <IDSymbol name="AddToChatCommand" value="0x0101"/>
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

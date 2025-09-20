@@ -1,0 +1,38 @@
+<UserControl x:Class="CodexVs.UI.CodexToolWindowControl"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  mc:Ignorable="d" d:DesignHeight="400" d:DesignWidth="300">
+  <Grid Margin="8">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+      <TextBlock Text="Model:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <ComboBox x:Name="ModelCombo" Width="160">
+        <ComboBoxItem Content="gpt-5-codex" IsSelected="True"/>
+        <ComboBoxItem Content="gpt-5"/>
+      </ComboBox>
+      <TextBlock Text=" Effort:" VerticalAlignment="Center" Margin="8,0,8,0"/>
+      <ComboBox x:Name="EffortCombo" Width="120">
+        <ComboBoxItem Content="low"/>
+        <ComboBoxItem Content="medium" IsSelected="True"/>
+        <ComboBoxItem Content="high"/>
+      </ComboBox>
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+      BorderBrush="#DDD" BorderThickness="1">
+      <StackPanel x:Name="Transcript" Margin="8">
+        <TextBlock Text="Chat transcripts will show here..." Foreground="#666"/>
+      </StackPanel>
+    </ScrollViewer>
+    <DockPanel Grid.Row="2" Margin="0,8,0,0">
+      <TextBox x:Name="PromptBox" MinHeight="24" AcceptsReturn="True"
+        VerticalScrollBarVisibility="Auto"/>
+      <Button Content="Send" Width="80" Margin="8,0,0,0" Click="OnSendClick"/>
+    </DockPanel>
+  </Grid>
+</UserControl>
