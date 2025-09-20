@@ -57,5 +57,16 @@ namespace CodexVS22
                 box.CaretIndex = box.Text.Length;
             }
         }
+
+        private async void OnSendClick(object sender, RoutedEventArgs e)
+        {
+            if (_host == null) return;
+            var box = this.FindName("InputBox") as TextBox;
+            var text = box?.Text?.Trim();
+            if (string.IsNullOrEmpty(text)) return;
+            var id = Guid.NewGuid().ToString();
+            var payload = $"{{\"id\":\"{id}\",\"ops\":[{{\"kind\":\"user_input\",\"text\":{System.Text.Json.JsonSerializer.Serialize(text)}}]}}";
+            await _host.SendAsync(payload);
+        }
     }
 }

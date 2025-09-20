@@ -29,6 +29,7 @@
             </StackPanel>
         </ScrollViewer>
         <DockPanel Grid.Row="2" Margin="6">
+            <Button Content="Send" Width="80" Height="28" DockPanel.Dock="Right" Margin="4,0,0,0" Click="OnSendClick" />
             <TextBox Name="InputBox" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
         </DockPanel>
     </Grid>
