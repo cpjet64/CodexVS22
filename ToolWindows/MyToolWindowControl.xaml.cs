@@ -59,6 +59,14 @@ namespace CodexVS22
                 case EventKind.StreamError:
                     await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
                     break;
+                case EventKind.ApplyPatchApprovalRequest:
+                    {
+                        var result = MessageBox.Show("Apply patch from Codex?", "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        var approved = result == MessageBoxResult.Yes;
+                        var approval = $"{{\\\"id\\\":\\\"{evt.Id}\\\",\\\"ops\\\":[{{\\\"kind\\\":\\\"patch_approval\\\",\\\"approved\\\":{approved.ToString().ToLower()} }}]}}";
+                        await _host.SendAsync(approval);
+                    }
+                    break;
                 case EventKind.ExecApprovalRequest:
                     {
                         var cmd = TryGetString(evt.Raw, "command") ?? "(unknown)";
@@ -98,6 +106,12 @@ namespace CodexVS22
                             t.Text += "\n$ exec finished\n";
                         }
                     });
+                    break;
+                case EventKind.TurnDiff:
+                    {
+                        var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+                        await pane.WriteLineAsync("[diff] Received diff from Codex");
+                    }
                     break;
                 case EventKind.TaskComplete:
                     _ = Dispatcher.InvokeAsync(() =>
