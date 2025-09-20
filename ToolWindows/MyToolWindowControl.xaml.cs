@@ -6,6 +6,7 @@ using Community.VisualStudio.Toolkit;
 using EnvDTE;
 using EnvDTE80;
 using CodexVS22.Core;
+using CodexVS22.Core.Protocol;
 
 namespace CodexVS22
 {
@@ -40,15 +41,42 @@ namespace CodexVS22
 
         private async void HandleStdout(string line)
         {
-            var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
-            await pane.WriteLineAsync($"[json] {line}");
-            // TODO(T3/T4): parse events and stream into chat transcript
+            var evt = EventParser.Parse(line);
+            switch (evt.Kind)
+            {
+                case EventKind.SessionConfigured:
+                    CodexVS22.Core.CodexCliHost.LastRolloutPath = TryGetString(evt.Raw, "rollout_path");
+                    break;
+                case EventKind.AgentMessageDelta:
+                    // TODO: stream token delta into current assistant bubble
+                    break;
+                case EventKind.AgentMessage:
+                    // TODO: finalize assistant bubble
+                    break;
+                case EventKind.TokenCount:
+                    // TODO: update token counters in footer
+                    break;
+                case EventKind.StreamError:
+                    await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
+                    break;
+                case EventKind.TaskComplete:
+                    // TODO: re-enable Send button
+                    break;
+                default:
+                    // Ignore unknowns; keep UI responsive
+                    break;
+            }
         }
 
         private async void HandleStderr(string line)
         {
             var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
             await pane.WriteLineAsync($"[stderr] {line}");
+        }
+
+        private static string TryGetString(System.Text.Json.JsonElement el, string name)
+        {
+            try { return el.TryGetProperty(name, out var v) ? v.GetString() : null; } catch { return null; }
         }
 
         public void AppendSelectionToInput(string text)
