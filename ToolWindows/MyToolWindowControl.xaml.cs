@@ -21,12 +21,27 @@ namespace CodexVS22
         {
             if (_host != null) return;
             _host = new CodexCliHost();
+            _host.OnStdoutLine += HandleStdout;
+            _host.OnStderrLine += HandleStderr;
             var pkg = await VS.Services.GetPackageAsync<CodexVS22Package>();
             var options = (CodexOptions)pkg.GetDialogPage(typeof(CodexOptions));
             var dte = await VS.GetServiceAsync<DTE, DTE2>();
             var solPath = dte?.Solution?.FullName;
             var dir = !string.IsNullOrEmpty(solPath) ? Path.GetDirectoryName(solPath) : string.Empty;
             await _host.StartAsync(options, dir);
+        }
+
+        private async void HandleStdout(string line)
+        {
+            var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+            await pane.WriteLineAsync($"[json] {line}");
+            // TODO(T3/T4): parse events and stream into chat transcript
+        }
+
+        private async void HandleStderr(string line)
+        {
+            var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+            await pane.WriteLineAsync($"[stderr] {line}");
         }
 
         public void AppendSelectionToInput(string text)
