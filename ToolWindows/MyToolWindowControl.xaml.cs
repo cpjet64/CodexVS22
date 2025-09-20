@@ -59,6 +59,16 @@ namespace CodexVS22
                 case EventKind.StreamError:
                     await VS.Notifications.ShowWarningAsync("Codex stream error. You can retry.");
                     break;
+                case EventKind.ExecApprovalRequest:
+                    {
+                        var cmd = TryGetString(evt.Raw, "command") ?? "(unknown)";
+                        var cwd = TryGetString(evt.Raw, "cwd") ?? "";
+                        var result = MessageBox.Show($"Approve exec?\n{cmd}\nCWD: {cwd}", "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        var approved = result == MessageBoxResult.Yes;
+                        var approval = $"{{\"id\":\"{evt.Id}\",\"ops\":[{{\"kind\":\"exec_approval\",\"approved\":{approved.ToString().ToLower()} }}]}}";
+                        await _host.SendAsync(approval);
+                    }
+                    break;
                 case EventKind.ExecCommandBegin:
                     _ = Dispatcher.InvokeAsync(() =>
                     {
