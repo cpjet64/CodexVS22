@@ -28,6 +28,7 @@
     <StartArguments>/rootsuffix Exp</StartArguments>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <ResolvePackageFileConflicts>true</ResolvePackageFileConflicts>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -112,6 +113,19 @@
     <PackageReference Update="System.Collections.Immutable" ExcludeAssets="all" />
     <PackageReference Update="System.Reflection.Metadata" ExcludeAssets="all" />
     <PackageReference Update="Microsoft.ServiceHub.Framework" ExcludeAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Options\CodexOptions.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Remove="System.Collections.Immutable" />
+    <Reference Remove="System.Reflection.Metadata" />
+    <Reference Remove="Microsoft.ServiceHub.Framework" />
+  </ItemGroup>
+  <ItemGroup>
+    <VSCTInclude Include="VSGlobals.vsct">
+      <Parent>VSCommandTable.vsct</Parent>
+    </VSCTInclude>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
