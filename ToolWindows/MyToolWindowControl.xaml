@@ -8,7 +8,6 @@
              xmlns:util="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Utilities"
              xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
              xmlns:toolkit="clr-namespace:Community.VisualStudio.Toolkit;assembly=Community.VisualStudio.Toolkit"
-             toolkit:Themes.UseVsTheme="True"
              mc:Ignorable="d"
              d:DesignHeight="300"
              d:DesignWidth="300"
@@ -45,7 +44,8 @@
             </Border>
         </Grid>
         <DockPanel Grid.Row="2" Margin="6">
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                <TextBlock Name="TokenUsageText" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed" />
                 <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <Button Name="SendButton" Content="Send" Width="80" Height="28" Margin="4,0,0,0" Click="OnSendClick" />
             </StackPanel>

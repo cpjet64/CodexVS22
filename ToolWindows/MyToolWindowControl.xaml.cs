@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -133,6 +134,23 @@ namespace CodexVS22
       {
         var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
         await pane.WriteLineAsync($"[error] HandleAgentMessage failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleTokenCount(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var (total, input, output) = ExtractTokenCounts(evt);
+        if (total == null && input == null && output == null)
+          return;
+        UpdateTokenUsage(total, input, output);
+      }
+      catch (Exception ex)
+      {
+        var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+        await pane.WriteLineAsync($"[error] HandleTokenCount failed: {ex.Message}");
       }
     }
 
@@ -294,6 +312,7 @@ namespace CodexVS22
           HandleAgentMessage(evt);
           break;
         case EventKind.TokenCount:
+          HandleTokenCount(evt);
           break;
         case EventKind.StreamError:
           HandleStreamError(evt);
@@ -422,6 +441,103 @@ namespace CodexVS22
       return string.Empty;
     }
 
+    private static (int? total, int? input, int? output) ExtractTokenCounts(EventMsg evt)
+    {
+      var obj = evt.Raw ?? new JObject();
+      var total = ResolveTokenValue(obj, "total", "total_tokens");
+      var input = ResolveTokenValue(obj, "input", "prompt", "input_tokens");
+      var output = ResolveTokenValue(obj, "output", "completion", "output_tokens");
+      return (total, input, output);
+    }
+
+    private static int? ResolveTokenValue(JObject source, params string[] names)
+    {
+      if (source == null)
+        return null;
+
+      foreach (var name in names)
+      {
+        if (TryReadInt(source[name], out var value))
+          return value;
+      }
+
+      foreach (var container in new[] { "counts", "usage", "token_counts" })
+      {
+        if (source[container] is JObject nested)
+        {
+          foreach (var name in names)
+          {
+            if (TryReadInt(nested[name], out var value))
+              return value;
+          }
+        }
+      }
+
+      return null;
+    }
+
+    private static bool TryReadInt(JToken token, out int value)
+    {
+      value = 0;
+      if (token == null)
+        return false;
+      if (token.Type == JTokenType.Integer)
+      {
+        value = token.Value<int>();
+        return true;
+      }
+      if (token.Type == JTokenType.Float)
+      {
+        value = (int)Math.Round(token.Value<double>());
+        return true;
+      }
+      var text = token.ToString();
+      return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+    }
+
+    private void UpdateTokenUsage(int? total, int? input, int? output)
+    {
+      if (this.FindName("TokenUsageText") is not TextBlock block)
+        return;
+
+      var builder = new StringBuilder();
+      if (total.HasValue)
+        builder.Append($"total {total.Value}");
+
+      var ioParts = new List<string>();
+      if (input.HasValue)
+        ioParts.Add($"in {input.Value}");
+      if (output.HasValue)
+        ioParts.Add($"out {output.Value}");
+
+      if (ioParts.Count > 0)
+      {
+        if (builder.Length > 0)
+          builder.Append(' ');
+        builder.Append('(');
+        builder.Append(string.Join(", ", ioParts));
+        builder.Append(')');
+      }
+
+      if (builder.Length == 0)
+      {
+        block.Text = string.Empty;
+        block.Visibility = Visibility.Collapsed;
+        return;
+      }
+
+      block.Text = $"Tokens: {builder}";
+      block.Visibility = Visibility.Visible;
+    }
+
+    private void ClearTokenUsage()
+    {
+      if (this.FindName("TokenUsageText") is not TextBlock block)
+        return;
+      block.Text = string.Empty;
+      block.Visibility = Visibility.Collapsed;
+    }
+
     public void AppendSelectionToInput(string text)
     {
       if (string.IsNullOrWhiteSpace(text)) return;
@@ -446,6 +562,7 @@ namespace CodexVS22
         var box = this.FindName("InputBox") as TextBox;
         var text = box?.Text?.Trim();
         if (string.IsNullOrEmpty(text)) return;
+        ClearTokenUsage();
         var id = Guid.NewGuid().ToString();
         var submission = new { id = id, ops = new object[] { new { kind = "user_input", text = text } } };
         var ok = await host.SendAsync(JsonConvert.SerializeObject(submission));
