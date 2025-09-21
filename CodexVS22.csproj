@@ -49,7 +49,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Commands\MyToolWindowCommand.cs" />
+    <Compile Include="Commands\OpenCodexCommand.cs" />
     <Compile Include="Commands\AddToChatCommand.cs" />
     <Compile Include="Commands\DiagnosticsCommand.cs" />
     <Compile Include="Core\CodexCliHost.cs" />
