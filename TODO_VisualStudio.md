@@ -49,7 +49,7 @@ Execution Order
 - [x] [T3.2] Create a UUID helper for Submission.id values.
 - [x] [T3.3] Maintain an in-flight map id→turn; remove on TaskComplete or error.
 - [x] [T3.4] Handle SessionConfigured first; update session header and status bar.
-- [ ] [T3.5] Stream AgentMessageDelta; finalize on AgentMessage.
+- [x] [T3.5] Stream AgentMessageDelta; finalize on AgentMessage.
 - [ ] [T3.6] Capture TokenCount and show usage counters in the footer.
 - [ ] [T3.7] Render StreamError as non-fatal banner; allow retry button.
 - [x] [T3.8] Log unknown EventMsg kinds without crashing; keep UI responsive.
