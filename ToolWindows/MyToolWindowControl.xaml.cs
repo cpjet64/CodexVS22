@@ -23,6 +23,7 @@ namespace CodexVS22
   {
     private CodexCliHost _host;
     private readonly Dictionary<string, AssistantTurn> _assistantTurns = new();
+    private string _lastUserInput;
 
     private sealed class AssistantTurn
     {
@@ -158,6 +159,25 @@ namespace CodexVS22
     {
       try
       {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var message = ExtractStreamErrorMessage(evt);
+        ShowStreamErrorBanner(message, !string.IsNullOrEmpty(_lastUserInput));
+        if (!string.IsNullOrEmpty(evt.Id) && _assistantTurns.TryGetValue(evt.Id, out var turn))
+        {
+          if (!turn.Buffer.ToString().EndsWith("[stream interrupted]", StringComparison.Ordinal))
+          {
+            if (turn.Buffer.Length > 0)
+              turn.Buffer.AppendLine().AppendLine();
+            turn.Buffer.Append("[stream interrupted]");
+            turn.Bubble.Text = turn.Buffer.ToString();
+          }
+          _assistantTurns.Remove(evt.Id);
+        }
+
+        var btn = this.FindName("SendButton") as Button;
+        var status = this.FindName("StatusText") as TextBlock;
+        if (btn != null) btn.IsEnabled = true;
+        if (status != null) status.Text = "Stream error";
         await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
       }
       catch (Exception ex)
@@ -289,6 +309,7 @@ namespace CodexVS22
         var status = this.FindName("StatusText") as TextBlock;
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = string.Empty;
+        HideStreamErrorBanner();
       }
       catch (Exception ex)
       {
@@ -352,6 +373,10 @@ namespace CodexVS22
           t.Children.Clear();
         }
         if (this.FindName("InputBox") is TextBox box) box.Clear();
+        _assistantTurns.Clear();
+        _lastUserInput = string.Empty;
+        ClearTokenUsage();
+        HideStreamErrorBanner();
       }
     }
 
@@ -439,6 +464,22 @@ namespace CodexVS22
       }
 
       return string.Empty;
+    }
+
+    private static string ExtractStreamErrorMessage(EventMsg evt)
+    {
+      var obj = evt.Raw;
+      string message = TryGetString(obj, "message")
+        ?? TryGetString(obj, "error")
+        ?? TryGetString(obj, "detail")
+        ?? TryGetString(obj, "description");
+
+      if (string.IsNullOrWhiteSpace(message) && obj?["error"] is JObject errorObj)
+      {
+        message = TryGetString(errorObj, "message") ?? TryGetString(errorObj, "detail");
+      }
+
+      return string.IsNullOrWhiteSpace(message) ? "Stream error" : message.Trim();
     }
 
     private static (int? total, int? input, int? output) ExtractTokenCounts(EventMsg evt)
@@ -538,6 +579,22 @@ namespace CodexVS22
       block.Visibility = Visibility.Collapsed;
     }
 
+    private void ShowStreamErrorBanner(string message, bool canRetry)
+    {
+      if (this.FindName("StreamErrorText") is TextBlock text)
+        text.Text = string.IsNullOrWhiteSpace(message) ? "Stream error" : message;
+      if (this.FindName("StreamRetryButton") is Button retry)
+        retry.IsEnabled = canRetry;
+      if (this.FindName("StreamErrorBanner") is Border banner)
+        banner.Visibility = Visibility.Visible;
+    }
+
+    private void HideStreamErrorBanner()
+    {
+      if (this.FindName("StreamErrorBanner") is Border banner)
+        banner.Visibility = Visibility.Collapsed;
+    }
+
     public void AppendSelectionToInput(string text)
     {
       if (string.IsNullOrWhiteSpace(text)) return;
@@ -556,38 +613,65 @@ namespace CodexVS22
     {
       try
       {
-        var host = _host;
-        if (host == null) return;
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         var box = this.FindName("InputBox") as TextBox;
-        var text = box?.Text?.Trim();
-        if (string.IsNullOrEmpty(text)) return;
-        ClearTokenUsage();
-        var id = Guid.NewGuid().ToString();
-        var submission = new { id = id, ops = new object[] { new { kind = "user_input", text = text } } };
-        var ok = await host.SendAsync(JsonConvert.SerializeObject(submission));
-        if (this.FindName("Transcript") is StackPanel t)
-        {
-          t.Children.Add(new TextBlock { Text = text, Tag = "user", TextWrapping = TextWrapping.Wrap });
-        }
-        var btn = this.FindName("SendButton") as Button;
-        var status = this.FindName("StatusText") as TextBlock;
-        if (!ok)
-        {
-          if (btn != null) btn.IsEnabled = true;
-          if (status != null) status.Text = "Send failed";
-        }
-        else
-        {
-          if (btn != null) btn.IsEnabled = false;
-          if (status != null) status.Text = "Streaming...";
-        }
+        await SendUserInputAsync(box?.Text, fromRetry: false);
       }
       catch (Exception ex)
       {
         var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
         await pane.WriteLineAsync($"[error] OnSendClick failed: {ex.Message}");
       }
+    }
+
+    private async Task SendUserInputAsync(string text, bool fromRetry)
+    {
+      var host = _host;
+      if (host == null)
+        return;
+
+      var payloadText = string.IsNullOrWhiteSpace(text) ? string.Empty : text.Trim();
+      if (string.IsNullOrEmpty(payloadText))
+        return;
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+      ClearTokenUsage();
+      HideStreamErrorBanner();
+
+      if (!fromRetry && this.FindName("Transcript") is StackPanel transcript)
+      {
+        transcript.Children.Add(new TextBlock { Text = payloadText, Tag = "user", TextWrapping = TextWrapping.Wrap });
+      }
+
+      var btn = this.FindName("SendButton") as Button;
+      var status = this.FindName("StatusText") as TextBlock;
+
+      var submission = new { id = Guid.NewGuid().ToString(), ops = new object[] { new { kind = "user_input", text = payloadText } } };
+      var ok = await host.SendAsync(JsonConvert.SerializeObject(submission));
+
+      if (!ok)
+      {
+        if (btn != null) btn.IsEnabled = true;
+        if (status != null) status.Text = "Send failed";
+        return;
+      }
+
+      if (btn != null) btn.IsEnabled = false;
+      if (status != null) status.Text = "Streaming...";
+      if (!fromRetry)
+        _lastUserInput = payloadText;
+    }
+
+    private void OnStreamRetryClick(object sender, RoutedEventArgs e)
+    {
+      var text = _lastUserInput;
+      if (string.IsNullOrEmpty(text))
+        return;
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(text, fromRetry: true));
+    }
+
+    private void OnStreamDismissClick(object sender, RoutedEventArgs e)
+    {
+      HideStreamErrorBanner();
     }
   }
 }

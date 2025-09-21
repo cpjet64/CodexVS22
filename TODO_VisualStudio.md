@@ -51,7 +51,7 @@ Execution Order
 - [x] [T3.4] Handle SessionConfigured first; update session header and status bar.
 - [x] [T3.5] Stream AgentMessageDelta; finalize on AgentMessage.
 - [x] [T3.6] Capture TokenCount and show usage counters in the footer.
-- [ ] [T3.7] Render StreamError as non-fatal banner; allow retry button.
+- [x] [T3.7] Render StreamError as non-fatal banner; allow retry button.
 - [x] [T3.8] Log unknown EventMsg kinds without crashing; keep UI responsive.
 - [ ] [T3.9] Add compact/no-op submission for heartbeat if CLI supports it.
 - [ ] [T3.10] Unit-test correlation with canned event streams.

@@ -43,13 +43,34 @@
                 </DockPanel>
             </Border>
         </Grid>
-        <DockPanel Grid.Row="2" Margin="6">
-            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                <TextBlock Name="TokenUsageText" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed" />
-                <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <Button Name="SendButton" Content="Send" Width="80" Height="28" Margin="4,0,0,0" Click="OnSendClick" />
-            </StackPanel>
-            <TextBox Name="InputBox" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
-        </DockPanel>
+        <Grid Grid.Row="2" Margin="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0"
+                    Name="StreamErrorBanner"
+                    Background="#FFFCE8"
+                    BorderBrush="#FFC77A"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed"
+                    Margin="0,0,0,6">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Name="StreamErrorText" VerticalAlignment="Center" Text="Stream error" />
+                    <Button Name="StreamRetryButton" Content="Retry" Width="60" Margin="12,0,0,0" Click="OnStreamRetryClick" />
+                    <Button Content="Dismiss" Width="70" Margin="6,0,0,0" Click="OnStreamDismissClick" />
+                </StackPanel>
+            </Border>
+            <DockPanel Grid.Row="1">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <TextBlock Name="TokenUsageText" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed" />
+                    <TextBlock Name="StatusText" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <Button Name="SendButton" Content="Send" Width="80" Height="28" Margin="4,0,0,0" Click="OnSendClick" />
+                </StackPanel>
+                <TextBox Name="InputBox" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
+            </DockPanel>
+        </Grid>
     </Grid>
 </UserControl>
