@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Text.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CodexVS22.Core.Protocol
 {
@@ -26,7 +26,7 @@ namespace CodexVS22.Core.Protocol
     {
         public EventKind Kind { get; set; }
         public string Id { get; set; }
-        public JsonElement Raw { get; set; }
+        public JObject Raw { get; set; }
     }
 
     public static class EventParser
@@ -35,20 +35,19 @@ namespace CodexVS22.Core.Protocol
         {
             try
             {
-                using var doc = JsonDocument.Parse(line);
-                var root = doc.RootElement;
-                var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : root.TryGetProperty("event", out var e) ? e.GetProperty("kind").GetString() : null;
-                var id = root.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                var root = JObject.Parse(line);
+                var kind = root["kind"]?.ToString() ?? root["event"]?["kind"]?.ToString();
+                var id = root["id"]?.ToString();
                 return new EventMsg
                 {
                     Kind = ToKind(kind),
                     Id = id,
-                    Raw = root.Clone()
+                    Raw = root
                 };
             }
             catch
             {
-                return new EventMsg { Kind = EventKind.Unknown, Raw = default };
+                return new EventMsg { Kind = EventKind.Unknown, Raw = null };
             }
         }
 
@@ -81,4 +80,3 @@ namespace CodexVS22.Core.Protocol
         public void Remove(string id) { if (!string.IsNullOrEmpty(id)) _map.TryRemove(id, out _); }
     }
 }
-
