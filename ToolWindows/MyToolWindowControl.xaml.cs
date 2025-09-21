@@ -407,6 +407,7 @@ namespace CodexVS22
         Tag = "assistant",
         TextWrapping = TextWrapping.Wrap
       };
+      bubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
       transcript.Children.Add(bubble);
       return bubble;
     }
@@ -639,7 +640,9 @@ namespace CodexVS22
 
       if (!fromRetry && this.FindName("Transcript") is StackPanel transcript)
       {
-        transcript.Children.Add(new TextBlock { Text = payloadText, Tag = "user", TextWrapping = TextWrapping.Wrap });
+        var userBubble = new TextBlock { Text = payloadText, Tag = "user", TextWrapping = TextWrapping.Wrap };
+        userBubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+        transcript.Children.Add(userBubble);
       }
 
       var btn = this.FindName("SendButton") as Button;
