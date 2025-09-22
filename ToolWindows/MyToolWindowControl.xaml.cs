@@ -13,6 +13,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Community.VisualStudio.Toolkit;
 using EnvDTE;
 using EnvDTE80;
@@ -752,6 +753,7 @@ namespace CodexVS22
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = "Stream error";
         await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
+        UpdateStreamingIndicator(false);
       }
       catch (Exception ex)
       {
@@ -972,6 +974,7 @@ namespace CodexVS22
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = string.Empty;
         HideStreamErrorBanner();
+        UpdateStreamingIndicator(false);
       }
       catch (Exception ex)
       {
@@ -1061,11 +1064,7 @@ namespace CodexVS22
         await VS.StatusBar.ShowMessageAsync("Transcript copied to clipboard.");
         if (sender is Button button)
         {
-          var shimmer = new DoubleAnimation(0.6, 0, TimeSpan.FromMilliseconds(400))
-          {
-            AutoReverse = false
-          };
-          button.BeginAnimation(Button.OpacityProperty, shimmer);
+          AnimateButtonFeedback(button);
         }
       }
       catch (Exception ex)
@@ -1134,6 +1133,37 @@ namespace CodexVS22
       }
 
       return builder.ToString();
+    }
+
+    private static void AnimateButtonFeedback(Button button)
+    {
+      var animation = new DoubleAnimation(1.0, 0.6, TimeSpan.FromMilliseconds(140))
+      {
+        AutoReverse = true,
+        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
+      };
+      button.BeginAnimation(UIElement.OpacityProperty, animation);
+    }
+
+    private static void AnimateBubbleFeedback(TextBlock bubble)
+    {
+      var baseBrush = bubble.Background as SolidColorBrush;
+      if (baseBrush == null || baseBrush.IsFrozen)
+      {
+        baseBrush = new SolidColorBrush(Colors.Transparent);
+        bubble.Background = baseBrush;
+      }
+
+      var animation = new ColorAnimation
+      {
+        From = Colors.Transparent,
+        To = Color.FromArgb(80, 0, 120, 215),
+        Duration = TimeSpan.FromMilliseconds(120),
+        AutoReverse = true,
+        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+      };
+
+      baseBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
     }
 
     private async Task<string> DetermineInitialWorkingDirectoryAsync()
@@ -3038,6 +3068,15 @@ namespace CodexVS22
       bubble.ContextMenu = menu;
     }
 
+    private void UpdateStreamingIndicator(bool streaming)
+    {
+      if (this.FindName("StreamingIndicator") is not ProgressBar indicator)
+        return;
+      indicator.Visibility = streaming ? Visibility.Visible : Visibility.Collapsed;
+      if (!streaming)
+        indicator.BeginAnimation(ProgressBar.OpacityProperty, null);
+    }
+
     private void FocusInputBox()
     {
       Dispatcher.BeginInvoke(new Action(() =>
@@ -3062,8 +3101,7 @@ namespace CodexVS22
             return;
           Clipboard.SetText(text);
           await VS.StatusBar.ShowMessageAsync("Message copied to clipboard.");
-          bubble.Background = new SolidColorBrush(Color.FromArgb(40, 0, 120, 215));
-          bubble.Dispatcher.BeginInvoke(new Action(() => bubble.Background = Brushes.Transparent), DispatcherPriority.Background);
+          AnimateBubbleFeedback(bubble);
         }
       }
       catch (Exception ex)
@@ -3457,11 +3495,13 @@ namespace CodexVS22
       {
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = "Send failed";
+        UpdateStreamingIndicator(false);
         return;
       }
 
       if (btn != null) btn.IsEnabled = false;
       if (status != null) status.Text = "Streaming...";
+      UpdateStreamingIndicator(true);
       if (!fromRetry)
         _lastUserInput = payloadText;
 
