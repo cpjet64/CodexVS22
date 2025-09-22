@@ -90,6 +90,22 @@
                     </Button>
                 </Grid>
             </Border>
+            <Border Name="FullAccessBanner"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.EnvironmentWarningBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Name="FullAccessText"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.EnvironmentWarningTextKey}}"
+                               TextWrapping="Wrap"
+                               Text="Full Access mode is enabled. Codex may auto-approve exec commands and patches." />
+                </StackPanel>
+            </Border>
             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
                     <Label Content="_Model:"

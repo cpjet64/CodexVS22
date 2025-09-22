@@ -386,6 +386,7 @@ namespace CodexVS22
       }
 
       await InitializeSelectorsAsync();
+      await UpdateFullAccessBannerAsync();
       ApplyWindowPreferences();
 
       await AdviseSolutionEventsAsync();
@@ -792,6 +793,7 @@ namespace CodexVS22
           return;
 
         var options = _options ?? new CodexOptions();
+        EnqueueFullAccessBannerRefresh();
         if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
           await host.SendAsync(CreatePatchApprovalSubmission(callId, autoApproved));
@@ -844,6 +846,7 @@ namespace CodexVS22
 
         var cwd = TryGetString(raw, "cwd") ?? string.Empty;
         var options = _options ?? new CodexOptions();
+        EnqueueFullAccessBannerRefresh();
 
         if (TryResolveExecApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
@@ -3336,6 +3339,29 @@ namespace CodexVS22
       }
 
       return TryGetString(raw, "call_id") ?? string.Empty;
+    }
+
+    private async Task UpdateFullAccessBannerAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      var banner = this.FindName("FullAccessBanner") as Border;
+      var text = this.FindName("FullAccessText") as TextBlock;
+      if (banner == null || text == null)
+        return;
+
+      var mode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
+      var show = mode == CodexOptions.ApprovalMode.AgentFullAccess;
+      banner.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+      if (show)
+      {
+        text.Text = "Full Access mode is enabled. Codex may auto-approve exec commands and patches.";
+      }
+    }
+
+    private void EnqueueFullAccessBannerRefresh()
+    {
+      ThreadHelper.JoinableTaskFactory.RunAsync(UpdateFullAccessBannerAsync);
     }
 
     private static string NormalizeCwd(string cwd)
