@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
+using CodexVS22;
 using Newtonsoft.Json.Linq;
 
 namespace CodexVS22.Tests;
@@ -24,6 +26,9 @@ internal static class Program
     RunTest(nameof(PatchApprovalSubmission_MatchesRequest), PatchApprovalSubmission_MatchesRequest);
     RunTest(nameof(RememberedExecApprovals_AreHonored), RememberedExecApprovals_AreHonored);
     RunTest(nameof(RememberedPatchApprovals_AreHonored), RememberedPatchApprovals_AreHonored);
+    RunTest(nameof(DiffParsing_WithFilesArray_ParsesDocuments), DiffParsing_WithFilesArray_ParsesDocuments);
+    RunTest(nameof(PatchApply_WithMatchingOriginal_WritesFile), PatchApply_WithMatchingOriginal_WritesFile);
+    RunTest(nameof(PatchApply_WithMismatchedOriginal_ReportsConflict), PatchApply_WithMismatchedOriginal_ReportsConflict);
 
     if (Failures.Count == 0)
     {
@@ -175,6 +180,72 @@ internal static class Program
     AssertFalse(approved, "Remembered patch decision mismatch");
     AssertTrue(resolver.TryResolvePatchApproval(autoApprove: false, "file", out approved), "Patch should resolve repeatedly via remembered decision");
     AssertFalse(approved, "Repeated remembered patch decision mismatch");
+  }
+
+  private static void DiffParsing_WithFilesArray_ParsesDocuments()
+  {
+    var payload = new JObject
+    {
+      ["files"] = new JArray
+      {
+        new JObject
+        {
+          ["path"] = "src/Program.cs",
+          ["original"] = "old",
+          ["text"] = "new"
+        },
+        new JObject
+        {
+          ["file"] = "README.md",
+          ["before"] = "old readme",
+          ["after"] = "new readme"
+        }
+      }
+    };
+
+    var docs = DiffUtilities.ExtractDocuments(payload);
+    AssertEqual("src/Program.cs", docs[0].Path, "First diff path mismatch");
+    AssertEqual("old", docs[0].Original, "First diff original mismatch");
+    AssertEqual("new", docs[0].Modified, "First diff modified mismatch");
+    AssertEqual("README.md", docs[1].Path, "Second diff path mismatch");
+    AssertEqual("old readme", docs[1].Original, "Second diff original mismatch");
+    AssertEqual("new readme", docs[1].Modified, "Second diff modified mismatch");
+  }
+
+  private static void PatchApply_WithMatchingOriginal_WritesFile()
+  {
+    var path = Path.Combine(Path.GetTempPath(), $"codex-test-{Guid.NewGuid():N}.txt");
+    try
+    {
+      File.WriteAllText(path, "line1\nline2\n");
+      var result = DiffUtilities.ApplyPatchToFileForTests(path, "line1\nline2\n", "line1\nline2\nline3\n");
+      AssertEqual(DiffUtilities.NormalizeForComparison("line1\nline2\nline3\n"), DiffUtilities.NormalizeForComparison(File.ReadAllText(path)), "Patched file content mismatch");
+      if (result != DiffUtilities.PatchApplyResult.Applied)
+        throw new InvalidOperationException("Expected patch to apply successfully");
+    }
+    finally
+    {
+      if (File.Exists(path))
+        File.Delete(path);
+    }
+  }
+
+  private static void PatchApply_WithMismatchedOriginal_ReportsConflict()
+  {
+    var path = Path.Combine(Path.GetTempPath(), $"codex-test-{Guid.NewGuid():N}.txt");
+    try
+    {
+      File.WriteAllText(path, "current\n");
+      var result = DiffUtilities.ApplyPatchToFileForTests(path, "expected\n", "patched\n");
+      if (result != DiffUtilities.PatchApplyResult.Conflict)
+        throw new InvalidOperationException("Expected conflict when originals differ");
+      AssertEqual(DiffUtilities.NormalizeForComparison("current\n"), DiffUtilities.NormalizeForComparison(File.ReadAllText(path)), "File should remain unchanged after conflict");
+    }
+    finally
+    {
+      if (File.Exists(path))
+        File.Delete(path);
+    }
   }
 
   private static void AssertEqual(string expected, string actual, string message)

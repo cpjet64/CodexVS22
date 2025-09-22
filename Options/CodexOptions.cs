@@ -43,6 +43,12 @@ namespace CodexVS22
         public string DefaultReasoning { get; set; } = "medium";
 
         [Category("Codex")]
+        [DisplayName("Auto-open patched files")]
+        [Description("Automatically open documents after Codex applies patches.")]
+        [DefaultValue(true)]
+        public bool AutoOpenPatchedFiles { get; set; } = true;
+
+        [Category("Codex")]
         [DisplayName("Window Width")]
         [Description("Last width of the Codex tool window (when floating).")]
         public double WindowWidth { get; set; } = 600;

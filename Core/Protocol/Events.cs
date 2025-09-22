@@ -19,6 +19,8 @@ namespace CodexVS22.Core.Protocol
         ExecCommandOutputDelta,
         ExecCommandEnd,
         TurnDiff,
+        PatchApplyBegin,
+        PatchApplyEnd,
         TaskComplete
     }
 
@@ -84,6 +86,8 @@ namespace CodexVS22.Core.Protocol
                 "ExecCommandOutputDelta" or "exec_command_output_delta" => EventKind.ExecCommandOutputDelta,
                 "ExecCommandEnd" or "exec_command_end" => EventKind.ExecCommandEnd,
                 "TurnDiff" or "turn_diff" => EventKind.TurnDiff,
+                "PatchApplyBegin" or "patch_apply_begin" => EventKind.PatchApplyBegin,
+                "PatchApplyEnd" or "patch_apply_end" => EventKind.PatchApplyEnd,
                 "TaskComplete" or "task_complete" => EventKind.TaskComplete,
                 _ => EventKind.Unknown
             };

@@ -17,5 +17,6 @@
     <Compile Include="..\Core\Protocol\Events.cs" Link="Protocol\Events.cs" />
     <Compile Include="..\Core\ChatTextUtilities.cs" Link="Core\ChatTextUtilities.cs" />
     <Compile Include="..\Core\ApprovalSubmissionFactory.cs" Link="Core\ApprovalSubmissionFactory.cs" />
+    <Compile Include="..\Core\DiffUtilities.cs" Link="Core\DiffUtilities.cs" />
   </ItemGroup>
 </Project>

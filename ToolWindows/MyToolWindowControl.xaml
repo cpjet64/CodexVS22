@@ -215,6 +215,14 @@
                                    Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
                                    Visibility="Collapsed"
                                    AutomationProperties.Name="Selected diff summary" />
+                        <Button Name="DiscardPatchButton"
+                                Margin="12,0,0,0"
+                                Padding="8,0"
+                                Visibility="Collapsed"
+                                AutomationProperties.Name="Discard Codex patch"
+                                Click="OnDiscardPatchClick">
+                            <AccessText Text="_Discard Patch" />
+                        </Button>
                     </StackPanel>
                     <ScrollViewer MaxHeight="220"
                                   VerticalScrollBarVisibility="Auto"

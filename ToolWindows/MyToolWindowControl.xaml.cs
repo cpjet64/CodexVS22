@@ -22,6 +22,7 @@ using EnvDTE;
 using EnvDTE80;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
+using static CodexVS22.Core.DiffUtilities;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -87,6 +88,11 @@ namespace CodexVS22
     private Dictionary<string, DiffDocument> _diffDocuments = new(StringComparer.OrdinalIgnoreCase);
     private bool _suppressDiffSelectionUpdate;
     private int _diffTotalLeafCount;
+    private bool _patchApplyInProgress;
+    private DateTime? _patchApplyStartedAt;
+    private int _patchApplyExpectedFiles;
+    private string _lastPatchCallId = string.Empty;
+    private string _lastPatchSignature = string.Empty;
     private sealed class AssistantTurn
     {
       public AssistantTurn(ChatBubbleElements elements)
@@ -885,6 +891,8 @@ namespace CodexVS22
 
         var options = _options ?? new CodexOptions();
         EnqueueFullAccessBannerRefresh();
+        _lastPatchCallId = callId;
+        _lastPatchSignature = signature ?? string.Empty;
         if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
           await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(callId, autoApproved));
@@ -905,6 +913,40 @@ namespace CodexVS22
       {
         var pane = await DiagnosticsPane.GetAsync();
         await pane.WriteLineAsync($"[error] HandleApplyPatchApproval failed: {ex.Message}");
+      }
+    }
+
+    private async void HandlePatchApplyBegin(EventMsg evt)
+    {
+      try
+      {
+        var raw = evt.Raw ?? new JObject();
+        var summary = TryGetString(raw, "summary") ?? "Applying Codex patch...";
+        var total = TryGetInt(raw, "total", "count", "files") ?? 0;
+        await BeginPatchApplyProgressAsync(summary, total);
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandlePatchApplyBegin failed: {ex.Message}");
+      }
+    }
+
+    private async void HandlePatchApplyEnd(EventMsg evt)
+    {
+      try
+      {
+        var raw = evt.Raw ?? new JObject();
+        var success = TryGetBoolean(raw, "success", "ok", "completed") ?? true;
+        var applied = TryGetInt(raw, "applied", "succeeded", "files_applied") ?? 0;
+        var failed = TryGetInt(raw, "failed", "errors", "files_failed") ?? 0;
+        var message = TryGetString(raw, "message") ?? TryGetString(raw, "description");
+        await CompletePatchApplyProgressAsync(success, applied, failed, message);
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandlePatchApplyEnd failed: {ex.Message}");
       }
     }
 
@@ -1101,7 +1143,7 @@ namespace CodexVS22
     {
       try
       {
-        var docs = ExtractDiffDocuments(evt.Raw);
+        var docs = DiffUtilities.ExtractDocuments(evt.Raw);
         if (docs.Count == 0)
         {
           var pane = await DiagnosticsPane.GetAsync();
@@ -1127,7 +1169,8 @@ namespace CodexVS22
 
       if (this.FindName("DiffTreeContainer") is not Border container ||
           this.FindName("DiffTreeView") is not TreeView tree ||
-          this.FindName("DiffSelectionSummary") is not TextBlock summary)
+          this.FindName("DiffSelectionSummary") is not TextBlock summary ||
+          this.FindName("DiscardPatchButton") is not Button discardButton)
         return;
 
       if (docs == null || docs.Count == 0)
@@ -1139,6 +1182,7 @@ namespace CodexVS22
         container.Visibility = Visibility.Collapsed;
         summary.Text = string.Empty;
         summary.Visibility = Visibility.Collapsed;
+        discardButton.Visibility = Visibility.Collapsed;
         return;
       }
 
@@ -1154,6 +1198,7 @@ namespace CodexVS22
         _diffTreeRoots = new ObservableCollection<DiffTreeItem>(roots);
         tree.ItemsSource = _diffTreeRoots;
         container.Visibility = Visibility.Visible;
+        discardButton.Visibility = Visibility.Visible;
       }
       finally
       {
@@ -1222,6 +1267,12 @@ namespace CodexVS22
           break;
         case EventKind.TurnDiff:
           HandleTurnDiff(evt);
+          break;
+        case EventKind.PatchApplyBegin:
+          HandlePatchApplyBegin(evt);
+          break;
+        case EventKind.PatchApplyEnd:
+          HandlePatchApplyEnd(evt);
           break;
         case EventKind.TaskComplete:
           HandleTaskComplete(evt);
@@ -1410,6 +1461,10 @@ namespace CodexVS22
       private double _totalSeconds;
       private int _currentTokens;
       private DateTime? _turnStart;
+      private int _patchSuccesses;
+      private int _patchFailures;
+      private double _patchSeconds;
+      private DateTime? _patchStart;
 
       public void BeginTurn()
       {
@@ -1450,6 +1505,31 @@ namespace CodexVS22
         _currentTokens = 0;
       }
 
+      public void BeginPatch()
+      {
+        _patchStart = DateTime.UtcNow;
+      }
+
+      public void CompletePatch(bool success, double durationSeconds)
+      {
+        if (durationSeconds <= 0 && _patchStart.HasValue)
+          durationSeconds = Math.Max(0.01, (DateTime.UtcNow - _patchStart.Value).TotalSeconds);
+        else if (durationSeconds <= 0)
+          durationSeconds = 0.01;
+
+        _patchSeconds += durationSeconds;
+        if (success)
+          _patchSuccesses++;
+        else
+          _patchFailures++;
+        _patchStart = null;
+      }
+
+      public void CancelPatch()
+      {
+        _patchStart = null;
+      }
+
       public void Reset()
       {
         _turns = 0;
@@ -1457,16 +1537,31 @@ namespace CodexVS22
         _totalSeconds = 0;
         _currentTokens = 0;
         _turnStart = null;
+        _patchSuccesses = 0;
+        _patchFailures = 0;
+        _patchSeconds = 0;
+        _patchStart = null;
       }
 
       public string GetSummary()
       {
-        if (_turns == 0)
-          return string.Empty;
+        var parts = new List<string>();
 
-        var avgTokens = (double)_totalTokens / _turns;
-        var rate = _totalSeconds > 0 ? _totalTokens / _totalSeconds : 0;
-        return $"Turns {_turns} • Avg {avgTokens:F1} tok • {rate:F1} tok/s";
+        if (_turns > 0)
+        {
+          var avgTokens = (double)_totalTokens / Math.Max(1, _turns);
+          var rate = _totalSeconds > 0 ? _totalTokens / _totalSeconds : 0;
+          parts.Add($"Turns {_turns} avg {avgTokens:F1} tok {rate:F1} tok/s");
+        }
+
+        var patchTotal = _patchSuccesses + _patchFailures;
+        if (patchTotal > 0)
+        {
+          var avgSeconds = _patchSeconds / Math.Max(1, patchTotal);
+          parts.Add($"Patch {_patchSuccesses}/{_patchFailures} avg {avgSeconds:F1}s");
+        }
+
+        return parts.Count == 0 ? string.Empty : string.Join(" • ", parts);
       }
     }
 
@@ -2835,6 +2930,67 @@ namespace CodexVS22
       try { return obj?[name]?.ToString(); } catch { return null; }
     }
 
+    private static int? TryGetInt(JObject obj, params string[] names)
+    {
+      if (obj == null || names == null)
+        return null;
+
+      foreach (var name in names)
+      {
+        if (string.IsNullOrEmpty(name))
+          continue;
+
+        var token = obj[name];
+        if (TryReadInt(token, out var value))
+          return value;
+
+        var text = token?.ToString();
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+          return value;
+      }
+
+      return null;
+    }
+
+    private static bool? TryGetBoolean(JObject obj, params string[] names)
+    {
+      if (obj == null || names == null)
+        return null;
+
+      foreach (var name in names)
+      {
+        if (string.IsNullOrEmpty(name))
+          continue;
+
+        var token = obj[name];
+        if (token == null)
+          continue;
+
+        if (token.Type == JTokenType.Boolean)
+          return token.Value<bool>();
+
+        if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+          return Math.Abs(token.Value<double>()) > double.Epsilon;
+
+        var text = token.ToString().Trim();
+        if (bool.TryParse(text, out var boolean))
+          return boolean;
+
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+          return numeric != 0;
+
+        if (string.Equals(text, "success", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "completed", StringComparison.OrdinalIgnoreCase))
+          return true;
+
+        if (string.Equals(text, "failed", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "error", StringComparison.OrdinalIgnoreCase))
+          return false;
+      }
+
+      return null;
+    }
+
     private void ConfigureHeartbeat(EventMsg evt)
     {
       var state = ExtractHeartbeatState(evt.Raw);
@@ -3490,6 +3646,8 @@ namespace CodexVS22
             await ApplySelectedDiffsAsync();
           else
             await LogManualApprovalAsync("patch", request.Signature, approved);
+          _lastPatchCallId = request.CallId ?? string.Empty;
+          _lastPatchSignature = request.Signature ?? string.Empty;
         }
       }
 
@@ -3615,20 +3773,6 @@ namespace CodexVS22
       }
 
       return TryGetString(raw, "call_id") ?? string.Empty;
-    }
-
-    private sealed class DiffDocument
-    {
-      public DiffDocument(string path, string original, string modified)
-      {
-        Path = string.IsNullOrWhiteSpace(path) ? "(untitled)" : path;
-        Original = original ?? string.Empty;
-        Modified = modified ?? string.Empty;
-      }
-
-      public string Path { get; }
-      public string Original { get; }
-      public string Modified { get; }
     }
 
     public sealed class DiffTreeItem : INotifyPropertyChanged
@@ -3944,6 +4088,201 @@ namespace CodexVS22
         CollectSelectedDocuments(child, results);
     }
 
+    private async Task<bool> TryDiscardPendingPatchAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      if (_activeApproval?.Kind == ApprovalKind.Patch)
+      {
+        await ResolveActiveApprovalAsync(false);
+        return true;
+      }
+
+      if (_approvalQueue.Count == 0)
+        return false;
+
+      var handled = false;
+      var pending = new Queue<ApprovalRequest>();
+      var host = _host;
+
+      while (_approvalQueue.Count > 0)
+      {
+        var request = _approvalQueue.Dequeue();
+        if (!handled && request.Kind == ApprovalKind.Patch)
+        {
+          if (host != null)
+            await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, false));
+          await LogManualApprovalAsync("patch", request.Signature, false);
+          handled = true;
+          continue;
+        }
+
+        pending.Enqueue(request);
+      }
+
+      while (pending.Count > 0)
+        _approvalQueue.Enqueue(pending.Dequeue());
+
+      if (handled)
+      {
+        await DisplayNextApprovalAsync();
+        _lastPatchCallId = string.Empty;
+        _lastPatchSignature = string.Empty;
+      }
+
+      return handled;
+    }
+
+    private async Task DiscardPatchAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      if (_patchApplyInProgress)
+      {
+        await VS.StatusBar.ShowMessageAsync("Codex patch is currently applying. Please wait for completion.");
+        return;
+      }
+
+      var handled = await TryDiscardPendingPatchAsync();
+
+      if (!handled && !string.IsNullOrEmpty(_lastPatchCallId))
+      {
+        var host = _host;
+        if (host != null)
+        {
+          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(_lastPatchCallId, false));
+          await LogManualApprovalAsync("patch", _lastPatchSignature, false);
+        }
+        handled = true;
+      }
+
+      if (!handled && (_diffTreeRoots == null || _diffTreeRoots.Count == 0))
+      {
+        await VS.StatusBar.ShowMessageAsync("No Codex patch to discard.");
+        return;
+      }
+
+      await CompletePatchApplyProgressAsync(false, 0, 0, handled ? "Codex patch discarded." : "Codex patch dismissed.", recordTelemetry: false);
+      await UpdateDiffTreeAsync(Array.Empty<DiffDocument>());
+      _lastPatchCallId = string.Empty;
+      _lastPatchSignature = string.Empty;
+      await VS.StatusBar.ShowMessageAsync("Codex patch discarded.");
+    }
+
+    private async void OnDiscardPatchClick(object sender, RoutedEventArgs e)
+    {
+      try
+      {
+        await DiscardPatchAsync();
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Discard patch failed: {ex.Message}");
+      }
+    }
+
+    private async Task BeginPatchApplyProgressAsync(string summary, int totalFiles)
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      _patchApplyInProgress = true;
+      _patchApplyStartedAt = DateTime.UtcNow;
+      _patchApplyExpectedFiles = Math.Max(totalFiles, 0);
+      _telemetry.BeginPatch();
+
+      if (string.IsNullOrWhiteSpace(summary))
+        summary = _patchApplyExpectedFiles > 0
+          ? $"Applying Codex patch ({_patchApplyExpectedFiles} files)..."
+          : "Applying Codex patch...";
+
+      if (this.FindName("StatusText") is TextBlock status)
+        status.Text = summary;
+
+      if (this.FindName("DiscardPatchButton") is Button discardButton)
+        discardButton.IsEnabled = false;
+
+      await VS.StatusBar.ShowMessageAsync(summary);
+      UpdateTelemetryUi();
+
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[patch] begin: {summary}");
+      }
+      catch
+      {
+        // diagnostics are best effort
+      }
+    }
+
+    private async Task CompletePatchApplyProgressAsync(bool success, int applied, int failed, string messageOverride = null, bool recordTelemetry = true)
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      var elapsed = _patchApplyStartedAt.HasValue
+        ? (DateTime.UtcNow - _patchApplyStartedAt.Value).TotalSeconds
+        : (double?)null;
+
+      _patchApplyInProgress = false;
+      _patchApplyStartedAt = null;
+      _patchApplyExpectedFiles = 0;
+      _lastPatchCallId = string.Empty;
+      _lastPatchSignature = string.Empty;
+
+      if (applied < 0) applied = 0;
+      if (failed < 0) failed = 0;
+
+      string message = string.IsNullOrWhiteSpace(messageOverride) ? null : messageOverride.Trim();
+      if (string.IsNullOrEmpty(message))
+      {
+        var duration = elapsed.HasValue ? $" in {elapsed.Value:F1}s" : string.Empty;
+        if (success)
+        {
+          var filesPart = applied > 0 ? $"{applied} file{(applied == 1 ? string.Empty : "s")}" : "files";
+          message = $"Codex patch applied ({filesPart}{duration}).";
+        }
+        else
+        {
+          var appliedPart = applied > 0 ? $"{applied} applied" : "0 applied";
+          var failedPart = failed > 0 ? $", {failed} failed" : string.Empty;
+          message = $"Codex patch failed ({appliedPart}{failedPart}{duration}).";
+        }
+      }
+
+      if (this.FindName("StatusText") is TextBlock status)
+        status.Text = message;
+
+      if (this.FindName("DiscardPatchButton") is Button discardButton)
+        discardButton.IsEnabled = true;
+
+      await VS.StatusBar.ShowMessageAsync(message);
+
+      if (recordTelemetry)
+      {
+        var duration = elapsed ?? 0.0;
+        _telemetry.CompletePatch(success, duration);
+      }
+      else
+      {
+        _telemetry.CancelPatch();
+      }
+      UpdateTelemetryUi();
+
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        var state = success ? "success" : "failure";
+        await pane.WriteLineAsync($"[patch] {state}: applied={applied}, failed={failed}{(elapsed.HasValue ? $", elapsed={elapsed.Value:F2}s" : string.Empty)}");
+        if (!string.IsNullOrEmpty(messageOverride))
+          await pane.WriteLineAsync($"[patch] detail: {messageOverride}");
+      }
+      catch
+      {
+        // diagnostics best effort
+      }
+    }
+
     private async Task<bool> ApplySelectedDiffsAsync()
     {
       await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -3955,8 +4294,16 @@ namespace CodexVS22
         return false;
       }
 
+      var applySummary = documents.Count == 1
+        ? $"Applying Codex patch to {documents[0].Path}..."
+        : $"Applying Codex patch ({documents.Count} files)...";
+
+      await BeginPatchApplyProgressAsync(applySummary, documents.Count);
+
       var applied = 0;
       var failures = new List<string>();
+      var conflicts = new List<string>();
+      var openDocuments = _options?.AutoOpenPatchedFiles ?? true;
 
       foreach (var document in documents)
       {
@@ -3975,10 +4322,19 @@ namespace CodexVS22
 
         try
         {
-          if (await ApplyDocumentTextAsync(fullPath, document.Modified))
-            applied++;
-          else
-            failures.Add(fullPath);
+          var result = await ApplyDocumentTextAsync(fullPath, document, openDocuments);
+          switch (result)
+          {
+            case PatchApplyResult.Applied:
+              applied++;
+              break;
+            case PatchApplyResult.Conflict:
+              conflicts.Add(fullPath);
+              break;
+            default:
+              failures.Add(fullPath);
+              break;
+          }
         }
         catch (Exception ex)
         {
@@ -3986,31 +4342,55 @@ namespace CodexVS22
         }
       }
 
-      if (applied > 0)
+      if (failures.Count > 0 || conflicts.Count > 0)
       {
-        var message = applied == 1
-          ? "Applied Codex patch to 1 file."
-          : $"Applied Codex patch to {applied} files.";
-        await VS.StatusBar.ShowMessageAsync(message);
+        try
+        {
+          var pane = await DiagnosticsPane.GetAsync();
+          foreach (var failure in failures)
+            await pane.WriteLineAsync($"[error] Failed to apply Codex patch: {failure}");
+          foreach (var conflict in conflicts)
+            await pane.WriteLineAsync($"[warn] Patch conflict for {conflict}; file differs from expected base. Manual merge recommended.");
+        }
+        catch
+        {
+          // diagnostics best effort
+        }
       }
 
-      if (failures.Count > 0)
+      var success = failures.Count == 0 && conflicts.Count == 0;
+      string messageOverride = null;
+      if (!success)
       {
-        var pane = await DiagnosticsPane.GetAsync();
-        foreach (var failure in failures)
-          await pane.WriteLineAsync($"[error] Failed to apply Codex patch: {failure}");
-        await VS.StatusBar.ShowMessageAsync("Some Codex patches could not be applied. Check Diagnostics.");
+        if (conflicts.Count > 0 && failures.Count == 0)
+        {
+          messageOverride = conflicts.Count == 1
+            ? "Codex patch encountered a conflict; please merge manually."
+            : $"Codex patch encountered {conflicts.Count} conflicts; please merge manually.";
+        }
+        else if (conflicts.Count > 0)
+        {
+          messageOverride = $"Codex patch completed with {conflicts.Count} conflicts and {failures.Count} errors.";
+        }
+        else if (failures.Count > 0)
+        {
+          messageOverride = failures.Count == 1
+            ? "Codex patch failed for 1 file."
+            : $"Codex patch failed for {failures.Count} files.";
+        }
       }
 
-      return failures.Count == 0;
+      await CompletePatchApplyProgressAsync(success, applied, failures.Count + conflicts.Count, messageOverride);
+
+      return success;
     }
 
-    private async Task<bool> ApplyDocumentTextAsync(string fullPath, string newContent)
+    private async Task<PatchApplyResult> ApplyDocumentTextAsync(string fullPath, DiffDocument document, bool openDocument)
     {
       await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
       if (string.IsNullOrWhiteSpace(fullPath))
-        return false;
+        return PatchApplyResult.Failed;
 
       var normalizedPath = NormalizeDirectory(fullPath);
       var directory = Path.GetDirectoryName(normalizedPath);
@@ -4020,24 +4400,85 @@ namespace CodexVS22
       if (!File.Exists(normalizedPath))
         File.WriteAllText(normalizedPath, string.Empty, Encoding.UTF8);
 
-      var documentView = await VS.Documents.OpenAsync(normalizedPath);
+      DocumentView documentView = null;
+      if (openDocument)
+      {
+        try
+        {
+          documentView = await VS.Documents.OpenAsync(normalizedPath);
+        }
+        catch
+        {
+          documentView = null;
+        }
+      }
+      else
+      {
+        try
+        {
+          documentView = await VS.Documents.GetDocumentViewAsync(normalizedPath);
+        }
+        catch
+        {
+          documentView = null;
+        }
+      }
+
       var buffer = documentView?.TextBuffer;
-      var text = NormalizeFileContent(newContent);
+      var newText = NormalizeFileContent(document?.Modified ?? string.Empty);
+
+      var currentText = buffer != null
+        ? buffer.CurrentSnapshot.GetText()
+        : File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
+
+      if (!string.IsNullOrEmpty(document?.Original))
+      {
+        var normalizedCurrent = NormalizeForComparison(currentText);
+        var normalizedOriginal = NormalizeForComparison(document.Original);
+        if (!string.Equals(normalizedCurrent, normalizedOriginal, StringComparison.Ordinal))
+        {
+          return PatchApplyResult.Conflict;
+        }
+      }
 
       if (buffer != null)
       {
         using var edit = buffer.CreateEdit();
-        edit.Replace(0, buffer.CurrentSnapshot.Length, text);
+        edit.Replace(0, buffer.CurrentSnapshot.Length, newText);
         if (!edit.Apply())
-          return false;
+          return PatchApplyResult.Failed;
 
         if (buffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument textDocument))
           textDocument?.MarkDirty();
-        return true;
+        if (!openDocument && documentView?.WindowFrame == null)
+        {
+          try
+          {
+            File.WriteAllText(normalizedPath, buffer.CurrentSnapshot.GetText(), Encoding.UTF8);
+          }
+          catch
+          {
+            // if writing fails, keep buffer dirty and continue
+          }
+        }
+        return PatchApplyResult.Applied;
       }
 
-      File.WriteAllText(normalizedPath, text, Encoding.UTF8);
-      return true;
+      File.WriteAllText(normalizedPath, newText, Encoding.UTF8);
+
+      if (openDocument)
+      {
+        try
+        {
+          await VS.Documents.OpenAsync(normalizedPath);
+        }
+        catch
+        {
+          // best effort
+        }
+      }
+
+      return PatchApplyResult.Applied;
     }
 
     private string ResolveDiffFullPath(string path)
@@ -4078,16 +4519,6 @@ namespace CodexVS22
       }
     }
 
-    private static string NormalizeFileContent(string content)
-    {
-      if (content == null)
-        return string.Empty;
-
-      var normalized = content.Replace("\r\n", "\n");
-      normalized = normalized.Replace("\r", "\n");
-      return normalized.Replace("\n", Environment.NewLine);
-    }
-
     private static string ConvertDiffPathToPlatform(string path)
     {
       if (string.IsNullOrWhiteSpace(path))
@@ -4114,48 +4545,6 @@ namespace CodexVS22
 
       HandleDiffSelectionChanged(item);
       e.Handled = true;
-    }
-
-    private static List<DiffDocument> ExtractDiffDocuments(JObject obj)
-    {
-      var results = new List<DiffDocument>();
-      if (obj == null)
-        return results;
-
-      if (obj["files"] is JArray filesArray)
-      {
-        foreach (var token in filesArray.OfType<JObject>())
-        {
-          var path = TryGetString(token, "path") ??
-                     TryGetString(token, "file") ??
-                     TryGetString(token, "relative_path") ??
-                     TryGetString(token, "filename") ??
-                     TryGetString(token, "target") ??
-                     string.Empty;
-
-          var original = ExtractDocumentText(token, new[] { "original", "previous", "before", "old", "base", "left" });
-          var modified = ExtractDocumentText(token, new[] { "text", "content", "after", "new", "current", "right" });
-
-          if (string.IsNullOrEmpty(modified))
-          {
-            modified = ExtractNestedText(token, "data", "text");
-            if (string.IsNullOrEmpty(modified))
-              continue;
-          }
-
-          if (string.IsNullOrEmpty(original))
-            original = string.Empty;
-
-          results.Add(new DiffDocument(path, original, modified));
-        }
-        return results;
-      }
-
-      var diffText = TryGetString(obj, "text") ?? TryGetString(obj, "diff") ?? TryGetString(obj, "patch");
-      if (!string.IsNullOrEmpty(diffText))
-        results.Add(new DiffDocument("codex.diff", string.Empty, diffText));
-
-      return results;
     }
 
     private static string ExtractDocumentText(JObject container, string[] keys)

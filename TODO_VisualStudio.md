@@ -91,12 +91,12 @@ Execution Order
 - [x] [T6.2] Render side-by-side diffs using Visual Studio diff services.
 - [x] [T6.3] Show a tree of files with checkboxes to include/exclude patches.
 - [x] [T6.4] Apply edits using ITextBuffer / ITextEdit transactions per file.
-- [ ] [T6.5] Show progress (PatchApplyBegin) and final result (PatchApplyEnd).
-- [ ] [T6.6] Offer Discard Patch to abandon changes and close the turn.
-- [ ] [T6.7] Auto-open changed files option in Options page.
-- [ ] [T6.8] Detect conflicts and warn; suggest manual merge if needed.
-- [ ] [T6.9] Telemetry: record apply success/failure and duration.
-- [ ] [T6.10] Unit tests on diff parsing and patch application on temp files.
+- [x] [T6.5] Show progress (PatchApplyBegin) and final result (PatchApplyEnd).
+- [x] [T6.6] Offer Discard Patch to abandon changes and close the turn.
+- [x] [T6.7] Auto-open changed files option in Options page.
+- [x] [T6.8] Detect conflicts and warn; suggest manual merge if needed.
+- [x] [T6.9] Telemetry: record apply success/failure and duration.
+- [x] [T6.10] Unit tests on diff parsing and patch application on temp files.
 - [ ] [T6.11] Post-test: empty diffs and binary files handled gracefully.
 - [ ] [T6.12] Ensure edits respect read-only files and source control locks.
 
