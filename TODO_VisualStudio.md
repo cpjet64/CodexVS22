@@ -53,8 +53,8 @@ Execution Order
 - [x] [T3.6] Capture TokenCount and show usage counters in the footer.
 - [x] [T3.7] Render StreamError as non-fatal banner; allow retry button.
 - [x] [T3.8] Log unknown EventMsg kinds without crashing; keep UI responsive.
-- [ ] [T3.9] Add compact/no-op submission for heartbeat if CLI supports it.
-- [ ] [T3.10] Unit-test correlation with canned event streams.
+- [x] [T3.9] Add compact/no-op submission for heartbeat if CLI supports it.
+- [x] [T3.10] Unit-test correlation with canned event streams.
 - [x] [T3.11] Persist last rollout_path observed for diagnostics.
 - [ ] [T3.12] Post-test with parallel turns and ensure correct routing.
 

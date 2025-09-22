@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36511.14 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexVS22", "CodexVS22.csproj", "{49DE8859-9AEC-4568-9C60-2836DA43142E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodexVS22.Tests", "CodexVS22.Tests\CodexVS22.Tests.csproj", "{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,18 @@ Global
 		{49DE8859-9AEC-4568-9C60-2836DA43142E}.Release|arm64.Build.0 = Release|arm64
 		{49DE8859-9AEC-4568-9C60-2836DA43142E}.Release|x86.ActiveCfg = Release|x86
 		{49DE8859-9AEC-4568-9C60-2836DA43142E}.Release|x86.Build.0 = Release|x86
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|arm64.ActiveCfg = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|arm64.Build.0 = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Debug|x86.Build.0 = Debug|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|arm64.ActiveCfg = Release|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|arm64.Build.0 = Release|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|x86.ActiveCfg = Release|Any CPU
+		{D0ABB0A0-7AC9-4A85-A3E5-77BF6806F494}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
