@@ -1,0 +1,1 @@
+{"commit": "7177595c7f7499f86d3cf7be0e9008a96c1cdbcb", "timestamp": "2025-09-22T04:35:12Z", "tests": ["dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj --no-restore"], "notes": {"msbuild": "Full VSIX build remains blocked in this environment because NuGet packages like Community.VisualStudio.Toolkit.17 cannot be restored offline."}}

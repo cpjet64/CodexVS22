@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -30,7 +31,12 @@ namespace CodexVS22.Core
             _lastOptions = options;
             _lastWorkingDir = workingDir;
             _reconnected = false;
+            var resolvedWorkingDir = ResolveWorkingDirectory(workingDir);
             var (fileName, args) = ResolveCli(options);
+            if (options?.UseWsl == true)
+            {
+                args = BuildWslArguments(args, resolvedWorkingDir);
+            }
             _lastResolved = $"{fileName} {args}";
             await LogInfoAsync($"Resolved CLI: {_lastResolved}");
 
@@ -43,7 +49,7 @@ namespace CodexVS22.Core
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
-                WorkingDirectory = string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir
+                WorkingDirectory = resolvedWorkingDir
             };
 
             _cts = new CancellationTokenSource();
@@ -76,17 +82,14 @@ namespace CodexVS22.Core
             return true;
         }
 
-        public async Task CheckAuthenticationAsync(CodexOptions options, string workingDir)
+        public async Task<CodexAuthenticationResult> CheckAuthenticationAsync(
+            CodexOptions options,
+            string workingDir)
         {
             try
             {
-                var (file, args) = ResolveCli(options);
-                // Convert proto command to whoami for check when not using WSL
-                if (file.Equals("wsl.exe", StringComparison.OrdinalIgnoreCase))
-                    args = "-- codex whoami";
-                else
-                    args = "whoami";
-
+                var resolvedWorkingDir = ResolveWorkingDirectory(workingDir);
+                var (file, args) = ResolveCodexCommand(options, "login status", resolvedWorkingDir);
                 var psi = new ProcessStartInfo
                 {
                     FileName = file,
@@ -95,42 +98,71 @@ namespace CodexVS22.Core
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
-                    WorkingDirectory = string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir
+                    WorkingDirectory = resolvedWorkingDir
                 };
-                using var p = Process.Start(psi);
-                var outText = await p.StandardOutput.ReadToEndAsync();
-                var errText = await p.StandardError.ReadToEndAsync();
-                p.WaitForExit(5000);
-                if (p.ExitCode != 0 || outText.IndexOf("not logged", StringComparison.OrdinalIgnoreCase) >= 0)
+
+                var result = await RunProcessOnceAsync(psi);
+                var (success, message) = InterpretLoginStatus(result);
+
+                if (success)
                 {
-                    await LogErrorAsync("Codex CLI not authenticated. Run 'codex login' in a terminal.");
+                    if (!string.IsNullOrEmpty(message))
+                        await LogInfoAsync(message);
                 }
                 else
                 {
-                    await LogInfoAsync($"whoami: {outText.Trim()}");
+                    if (!string.IsNullOrWhiteSpace(result.StandardError))
+                    {
+                        foreach (var line in SplitLines(result.StandardError))
+                            await LogErrorAsync(line);
+                    }
+
+                    if (!string.IsNullOrEmpty(message))
+                    {
+                        foreach (var line in SplitLines(message))
+                            await LogErrorAsync(line);
+                    }
+
+                    await LogErrorAsync(
+                        "Codex CLI not authenticated. Run 'codex login' in a terminal.");
                 }
+
+                return new CodexAuthenticationResult(success, message);
             }
             catch (Exception ex)
             {
-                await LogErrorAsync($"whoami check failed: {ex.Message}");
+                await LogErrorAsync($"login status check failed: {ex.Message}");
+                return new CodexAuthenticationResult(false, string.Empty);
             }
         }
 
-        public async Task SendAsync(string jsonLine)
+        public async Task<bool> LoginAsync(CodexOptions options, string workingDir)
+        {
+            return await ExecuteCodexUtilityAsync(options, workingDir, "login", "login");
+        }
+
+        public async Task<bool> LogoutAsync(CodexOptions options, string workingDir)
+        {
+            return await ExecuteCodexUtilityAsync(options, workingDir, "logout", "logout");
+        }
+
+        public async Task<bool> SendAsync(string jsonLine)
         {
             try
             {
                 StreamWriter writer;
                 lock (_gate) writer = _stdin;
                 if (writer == null)
-                    return;
+                    return false;
                 await writer.WriteLineAsync(jsonLine);
                 await writer.FlushAsync();
+                return true;
             }
             catch (Exception ex)
             {
                 await LogErrorAsync($"Write error: {ex.Message}");
                 await TryReconnectAsync();
+                return false;
             }
         }
 
@@ -199,9 +231,255 @@ namespace CodexVS22.Core
             return ("codex", "proto");
         }
 
+        private static (string fileName, string args) ResolveCodexCommand(
+            CodexOptions options,
+            string subcommand,
+            string workingDir)
+        {
+            var exe = (options?.CliExecutable ?? string.Empty).Trim();
+            if (options?.UseWsl == true)
+            {
+                var args = $"-- codex {subcommand}";
+                args = BuildWslArguments(args, workingDir);
+                return ("wsl.exe", args);
+            }
+
+            if (!string.IsNullOrEmpty(exe))
+            {
+                return (exe, subcommand);
+            }
+
+            return ("codex", subcommand);
+        }
+
+        private static async Task<ProcessResult> RunProcessOnceAsync(ProcessStartInfo psi)
+        {
+            using var process = new Process { StartInfo = psi };
+            process.Start();
+
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+
+            await Task.Run(() => process.WaitForExit());
+
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+
+            return new ProcessResult(process.ExitCode, stdout ?? string.Empty, stderr ?? string.Empty);
+        }
+
+        private async Task<bool> ExecuteCodexUtilityAsync(
+            CodexOptions options,
+            string workingDir,
+            string subcommand,
+            string friendlyName)
+        {
+            try
+            {
+                var resolvedWorkingDir = ResolveWorkingDirectory(workingDir);
+                var (file, args) = ResolveCodexCommand(options, subcommand, resolvedWorkingDir);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = file,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = false,
+                    CreateNoWindow = true,
+                    WorkingDirectory = resolvedWorkingDir
+                };
+
+                await LogInfoAsync($"codex {friendlyName} starting...");
+                var result = await RunProcessOnceAsync(psi);
+
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    foreach (var line in SplitLines(result.StandardOutput))
+                        await LogInfoAsync(line);
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    foreach (var line in SplitLines(result.StandardError))
+                        await LogErrorAsync(line);
+                }
+
+                if (result.ExitCode != 0)
+                {
+                    await LogErrorAsync(
+                        $"codex {friendlyName} failed with exit code {result.ExitCode}");
+                }
+
+                return result.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                await LogErrorAsync($"codex {friendlyName} failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static string ResolveWorkingDirectory(string workingDir)
+        {
+            return string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir;
+        }
+
+        private static string BuildWslArguments(string args, string workingDir)
+        {
+            if (string.IsNullOrWhiteSpace(args) || args.Contains("--cd"))
+                return args;
+
+            var wslPath = ConvertWindowsPathToWsl(workingDir);
+            if (string.IsNullOrWhiteSpace(wslPath))
+                return args;
+
+            return $"--cd {EscapeWslArgument(wslPath)} {args}";
+        }
+
+        private static string ConvertWindowsPathToWsl(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return string.Empty;
+
+            if (path.StartsWith("/", StringComparison.Ordinal))
+                return path;
+
+            if (path.StartsWith("\\\\wsl$\\", StringComparison.OrdinalIgnoreCase))
+            {
+                var trimmed = path.Substring("\\\\wsl$\\".Length).Replace('\\', '/');
+                return $"/{trimmed}";
+            }
+
+            path = path.Replace('\\', '/');
+            if (path.Length >= 2 && path[1] == ':')
+            {
+                var drive = char.ToLowerInvariant(path[0]);
+                var remainder = path.Substring(2).TrimStart('/');
+                return string.IsNullOrEmpty(remainder)
+                    ? $"/mnt/{drive}"
+                    : $"/mnt/{drive}/{remainder}";
+            }
+
+            return path;
+        }
+
+        private static string EscapeWslArgument(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return "\".\"";
+
+            var escaped = value.Replace("\"", "\\\"");
+            return $"\"{escaped}\"";
+        }
+
+        private static IEnumerable<string> SplitLines(string value)
+        {
+            using var reader = new StringReader(value);
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                    yield return line.TrimEnd();
+            }
+        }
+
+        private static (bool success, string message) InterpretLoginStatus(ProcessResult result)
+        {
+            var stdout = (result.StandardOutput ?? string.Empty).Trim();
+            var stderr = (result.StandardError ?? string.Empty).Trim();
+            var combined = Combine(stdout, stderr);
+
+            if (result.ExitCode != 0)
+            {
+                return (false, combined);
+            }
+
+            if (IsLoggedIn(stdout) || IsLoggedIn(stderr))
+            {
+                var message = !string.IsNullOrWhiteSpace(stdout) ? stdout : stderr;
+                return (true, message);
+            }
+
+            if (IndicatesLoggedOut(stdout) || IndicatesLoggedOut(stderr))
+            {
+                return (false, combined);
+            }
+
+            if (!string.IsNullOrWhiteSpace(stderr))
+            {
+                return (false, combined);
+            }
+
+            if (string.IsNullOrWhiteSpace(combined))
+            {
+                return (true, string.Empty);
+            }
+
+            // Command succeeded but output is unfamiliar; surface it while assuming success.
+            return (true, combined);
+        }
+
+        private static string Combine(string stdout, string stderr)
+        {
+            if (string.IsNullOrWhiteSpace(stdout))
+                return string.IsNullOrWhiteSpace(stderr) ? string.Empty : stderr;
+            if (string.IsNullOrWhiteSpace(stderr))
+                return stdout;
+            return stdout + Environment.NewLine + stderr;
+        }
+
+        private static bool IsLoggedIn(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            return text.IndexOf("logged in", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool IndicatesLoggedOut(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            if (text.IndexOf("not logged", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            if (text.IndexOf("log in", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                text.IndexOf("logged in", StringComparison.OrdinalIgnoreCase) < 0)
+                return true;
+
+            return false;
+        }
+
+        private readonly struct ProcessResult
+        {
+            public ProcessResult(int exitCode, string standardOutput, string standardError)
+            {
+                ExitCode = exitCode;
+                StandardOutput = standardOutput;
+                StandardError = standardError;
+            }
+
+            public int ExitCode { get; }
+            public string StandardOutput { get; }
+            public string StandardError { get; }
+        }
+
+        public readonly struct CodexAuthenticationResult
+        {
+            public CodexAuthenticationResult(bool isAuthenticated, string message)
+            {
+                IsAuthenticated = isAuthenticated;
+                Message = message ?? string.Empty;
+            }
+
+            public bool IsAuthenticated { get; }
+            public string Message { get; }
+        }
+
         private static async Task EnsureDiagnosticsPaneAsync()
         {
-            await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+            await DiagnosticsPane.GetAsync();
         }
 
         private static int _rateCount;
@@ -221,7 +499,7 @@ namespace CodexVS22.Core
                 // Drop excessive logs to keep VS responsive
                 return;
             }
-            var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+            var pane = await DiagnosticsPane.GetAsync();
             await pane.WriteLineAsync($"[{prefix}] {now:HH:mm:ss} {message}");
         }
 
@@ -235,9 +513,10 @@ namespace CodexVS22.Core
         {
             try
             {
+                var resolvedWorkingDir = ResolveWorkingDirectory(workingDir);
                 var (file, args) = ResolveCli(options);
                 if (file.Equals("wsl.exe", StringComparison.OrdinalIgnoreCase))
-                    args = "-- codex --version";
+                    args = BuildWslArguments("-- codex --version", resolvedWorkingDir);
                 else
                     args = "--version";
                 var psi = new ProcessStartInfo
@@ -248,7 +527,7 @@ namespace CodexVS22.Core
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
-                    WorkingDirectory = string.IsNullOrEmpty(workingDir) ? Environment.CurrentDirectory : workingDir
+                    WorkingDirectory = resolvedWorkingDir
                 };
                 using var p = Process.Start(psi);
                 var outText = await p.StandardOutput.ReadToEndAsync();

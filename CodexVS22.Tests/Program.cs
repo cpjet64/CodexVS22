@@ -163,6 +163,8 @@ internal static class Program
     resolver.RememberExecDecision("dir", true);
     AssertTrue(resolver.TryResolveExecApproval(autoApprove: false, "dir", out var approved), "Exec should resolve via remembered decision");
     AssertTrue(approved, "Remembered exec decision mismatch");
+    AssertTrue(resolver.TryResolveExecApproval(autoApprove: false, "dir", out approved), "Exec should resolve repeatedly via remembered decision");
+    AssertTrue(approved, "Repeated remembered exec decision mismatch");
   }
 
   private static void RememberedPatchApprovals_AreHonored()
@@ -171,6 +173,8 @@ internal static class Program
     resolver.RememberPatchDecision("file", false);
     AssertTrue(resolver.TryResolvePatchApproval(autoApprove: false, "file", out var approved), "Patch should resolve via remembered decision");
     AssertFalse(approved, "Remembered patch decision mismatch");
+    AssertTrue(resolver.TryResolvePatchApproval(autoApprove: false, "file", out approved), "Patch should resolve repeatedly via remembered decision");
+    AssertFalse(approved, "Repeated remembered patch decision mismatch");
   }
 
   private static void AssertEqual(string expected, string actual, string message)

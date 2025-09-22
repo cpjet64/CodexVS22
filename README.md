@@ -23,3 +23,8 @@ Options
   - CLI Executable Path: Full path to `codex` (empty uses PATH).
   - Use WSL: Runs `wsl.exe -- codex proto` when enabled.
   - Open on Startup: Auto‑opens Codex tool window when VS loads.
+
+Authentication
+- The tool window shows a login banner if `codex login status` reports you are logged out. Click
+  Login to run `codex login` (respecting the WSL setting) and restart the background CLI. Use the
+  Logout button on the header to invalidate the session when needed.

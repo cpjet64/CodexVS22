@@ -36,13 +36,28 @@ namespace CodexVS22.Core.Protocol
             try
             {
                 var root = JObject.Parse(line);
-                var kind = root["kind"]?.ToString() ?? root["event"]?["kind"]?.ToString();
-                var id = root["id"]?.ToString();
+
+                var payload =
+                    root["msg"] as JObject ??
+                    root["event"] as JObject ??
+                    root["payload"] as JObject ??
+                    root;
+
+                var kindValue =
+                    payload?["kind"]?.ToString() ??
+                    payload?["type"]?.ToString() ??
+                    root["kind"]?.ToString() ??
+                    root["event"]?["kind"]?.ToString();
+
+                var id =
+                    root["id"]?.ToString() ??
+                    payload?["id"]?.ToString();
+
                 return new EventMsg
                 {
-                    Kind = ToKind(kind),
+                    Kind = ToKind(kindValue),
                     Id = id,
-                    Raw = root
+                    Raw = payload ?? root
                 };
             }
             catch
@@ -53,20 +68,23 @@ namespace CodexVS22.Core.Protocol
 
         private static EventKind ToKind(string s)
         {
+            if (string.IsNullOrEmpty(s))
+                return EventKind.Unknown;
+
             return s switch
             {
-                "SessionConfigured" => EventKind.SessionConfigured,
-                "AgentMessageDelta" => EventKind.AgentMessageDelta,
-                "AgentMessage" => EventKind.AgentMessage,
-                "TokenCount" => EventKind.TokenCount,
-                "StreamError" => EventKind.StreamError,
-                "ExecApprovalRequest" => EventKind.ExecApprovalRequest,
-                "ApplyPatchApprovalRequest" => EventKind.ApplyPatchApprovalRequest,
-                "ExecCommandBegin" => EventKind.ExecCommandBegin,
-                "ExecCommandOutputDelta" => EventKind.ExecCommandOutputDelta,
-                "ExecCommandEnd" => EventKind.ExecCommandEnd,
-                "TurnDiff" => EventKind.TurnDiff,
-                "TaskComplete" => EventKind.TaskComplete,
+                "SessionConfigured" or "session_configured" => EventKind.SessionConfigured,
+                "AgentMessageDelta" or "agent_message_delta" => EventKind.AgentMessageDelta,
+                "AgentMessage" or "agent_message" => EventKind.AgentMessage,
+                "TokenCount" or "token_count" => EventKind.TokenCount,
+                "StreamError" or "stream_error" => EventKind.StreamError,
+                "ExecApprovalRequest" or "exec_approval_request" => EventKind.ExecApprovalRequest,
+                "ApplyPatchApprovalRequest" or "apply_patch_approval_request" => EventKind.ApplyPatchApprovalRequest,
+                "ExecCommandBegin" or "exec_command_begin" => EventKind.ExecCommandBegin,
+                "ExecCommandOutputDelta" or "exec_command_output_delta" => EventKind.ExecCommandOutputDelta,
+                "ExecCommandEnd" or "exec_command_end" => EventKind.ExecCommandEnd,
+                "TurnDiff" or "turn_diff" => EventKind.TurnDiff,
+                "TaskComplete" or "task_complete" => EventKind.TaskComplete,
                 _ => EventKind.Unknown
             };
         }

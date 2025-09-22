@@ -8,6 +8,7 @@
              xmlns:vsfx="clr-namespace:Microsoft.VisualStudio.Shell;assembly=Microsoft.VisualStudio.Shell.15.0"
              xmlns:util="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Utilities"
              xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
+             xmlns:local="clr-namespace:CodexVS22"
              xmlns:toolkit="clr-namespace:Community.VisualStudio.Toolkit;assembly=Community.VisualStudio.Toolkit"
              mc:Ignorable="d"
              d:DesignHeight="300"
@@ -188,7 +189,68 @@
             </StackPanel>
         </StackPanel>
         <Grid Grid.Row="1" Margin="6">
-            <ScrollViewer VerticalScrollBarVisibility="Auto"
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0"
+                    Name="DiffTreeContainer"
+                    Visibility="Collapsed"
+                    Margin="0,0,0,12"
+                    Padding="6"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Top"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Margin="0,0,0,6">
+                        <TextBlock Text="Patches"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                        <TextBlock Name="DiffSelectionSummary"
+                                   Margin="12,0,0,0"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Visibility="Collapsed"
+                                   AutomationProperties.Name="Selected diff summary" />
+                    </StackPanel>
+                    <ScrollViewer MaxHeight="220"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  AutomationProperties.Name="Diff file selection">
+                        <TreeView Name="DiffTreeView"
+                                  AutomationProperties.Name="Diff tree">
+                            <TreeView.ItemContainerStyle>
+                                <Style TargetType="TreeViewItem">
+                                    <Setter Property="IsExpanded"
+                                            Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                </Style>
+                            </TreeView.ItemContainerStyle>
+                            <TreeView.Resources>
+                                <HierarchicalDataTemplate DataType="{x:Type local:MyToolWindowControl.DiffTreeItem}"
+                                                         ItemsSource="{Binding Children}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox IsThreeState="True"
+                                                  Margin="0,0,6,0"
+                                                  VerticalAlignment="Center"
+                                                  IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  Click="OnDiffTreeCheckBoxClick"
+                                                  AutomationProperties.Name="{Binding RelativePath}" />
+                                        <TextBlock Text="{Binding Name}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                    </StackPanel>
+                                </HierarchicalDataTemplate>
+                            </TreeView.Resources>
+                        </TreeView>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <ScrollViewer x:Name="TranscriptScrollViewer"
+                          Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           Background="Transparent"
                           AutomationProperties.Name="Chat transcript"

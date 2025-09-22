@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -10,6 +12,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -19,13 +22,14 @@ using EnvDTE;
 using EnvDTE80;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Threading;
 using System.Text.RegularExpressions;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell.Interop;
 using System.Windows.Threading;
 using DteProject = EnvDTE.Project;
 using DteProjects = EnvDTE.Projects;
@@ -79,15 +83,37 @@ namespace CodexVS22
     private CodexOptions.ApprovalMode _selectedApprovalMode = CodexOptions.ApprovalMode.Chat;
     private Window _hostWindow;
     private bool _windowEventsHooked;
+    private ObservableCollection<DiffTreeItem> _diffTreeRoots = new();
+    private Dictionary<string, DiffDocument> _diffDocuments = new(StringComparer.OrdinalIgnoreCase);
+    private bool _suppressDiffSelectionUpdate;
+    private int _diffTotalLeafCount;
     private sealed class AssistantTurn
     {
-      public AssistantTurn(TextBlock bubble)
+      public AssistantTurn(ChatBubbleElements elements)
       {
-        Bubble = bubble;
+        Container = elements.Container;
+        Header = elements.Header;
+        Bubble = elements.Body;
       }
 
+      public Border Container { get; }
+      public TextBlock Header { get; }
       public TextBlock Bubble { get; }
       public StringBuilder Buffer { get; } = new StringBuilder();
+    }
+
+    private sealed class ChatBubbleElements
+    {
+      public ChatBubbleElements(Border container, TextBlock header, TextBlock body)
+      {
+        Container = container;
+        Header = header;
+        Body = body;
+      }
+
+      public Border Container { get; }
+      public TextBlock Header { get; }
+      public TextBlock Body { get; }
     }
 
     private enum ApprovalKind
@@ -862,6 +888,8 @@ namespace CodexVS22
         if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
           await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(callId, autoApproved));
+          if (autoApproved)
+            await ApplySelectedDiffsAsync();
           await LogAutoApprovalAsync("patch", signature, autoApproved, autoReason);
           await VS.StatusBar.ShowMessageAsync($"Codex patch {(autoApproved ? "approved" : "denied")} ({autoReason}).");
           return;
@@ -1073,14 +1101,66 @@ namespace CodexVS22
     {
       try
       {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync("[diff] Received diff from Codex");
+        var docs = ExtractDiffDocuments(evt.Raw);
+        if (docs.Count == 0)
+        {
+          var pane = await DiagnosticsPane.GetAsync();
+          await pane.WriteLineAsync("[warn] TurnDiff event missing diff content; nothing to display.");
+          return;
+        }
+
+        await UpdateDiffTreeAsync(docs);
+
+        foreach (var doc in docs)
+          await ShowDiffAsync(doc);
       }
       catch (Exception ex)
       {
         var pane = await DiagnosticsPane.GetAsync();
         await pane.WriteLineAsync($"[error] HandleTurnDiff failed: {ex.Message}");
       }
+    }
+
+    private async Task UpdateDiffTreeAsync(IReadOnlyList<DiffDocument> docs)
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      if (this.FindName("DiffTreeContainer") is not Border container ||
+          this.FindName("DiffTreeView") is not TreeView tree ||
+          this.FindName("DiffSelectionSummary") is not TextBlock summary)
+        return;
+
+      if (docs == null || docs.Count == 0)
+      {
+        _diffDocuments.Clear();
+        _diffTreeRoots.Clear();
+        _diffTotalLeafCount = 0;
+        tree.ItemsSource = null;
+        container.Visibility = Visibility.Collapsed;
+        summary.Text = string.Empty;
+        summary.Visibility = Visibility.Collapsed;
+        return;
+      }
+
+      _diffDocuments = docs
+        .GroupBy(doc => NormalizeDiffPath(doc.Path))
+        .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+
+      _suppressDiffSelectionUpdate = true;
+      try
+      {
+        var (roots, leafCount) = BuildDiffTree(docs, HandleDiffSelectionChanged);
+        _diffTotalLeafCount = leafCount;
+        _diffTreeRoots = new ObservableCollection<DiffTreeItem>(roots);
+        tree.ItemsSource = _diffTreeRoots;
+        container.Visibility = Visibility.Visible;
+      }
+      finally
+      {
+        _suppressDiffSelectionUpdate = false;
+      }
+
+      UpdateDiffSelectionSummary();
     }
 
     private async void HandleTaskComplete(EventMsg evt)
@@ -1155,10 +1235,7 @@ namespace CodexVS22
     {
       if (System.Windows.MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
       {
-        if (this.FindName("Transcript") is StackPanel t)
-        {
-          t.Children.Clear();
-        }
+        ResetTranscript();
         if (this.FindName("InputBox") is TextBox box) box.Clear();
         _assistantTurns.Clear();
         _execTurns.Clear();
@@ -1177,6 +1254,7 @@ namespace CodexVS22
         UpdateStreamingIndicator(false);
         FocusInputBox();
         UpdateTelemetryUi();
+        ScrollTranscriptToEnd();
       }
     }
 
@@ -3408,7 +3486,9 @@ namespace CodexVS22
         else
         {
           await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, approved));
-          if (!approved)
+          if (approved)
+            await ApplySelectedDiffsAsync();
+          else
             await LogManualApprovalAsync("patch", request.Signature, approved);
         }
       }
@@ -3537,6 +3617,671 @@ namespace CodexVS22
       return TryGetString(raw, "call_id") ?? string.Empty;
     }
 
+    private sealed class DiffDocument
+    {
+      public DiffDocument(string path, string original, string modified)
+      {
+        Path = string.IsNullOrWhiteSpace(path) ? "(untitled)" : path;
+        Original = original ?? string.Empty;
+        Modified = modified ?? string.Empty;
+      }
+
+      public string Path { get; }
+      public string Original { get; }
+      public string Modified { get; }
+    }
+
+    public sealed class DiffTreeItem : INotifyPropertyChanged
+    {
+      private readonly Action<DiffTreeItem> _onCheckChanged;
+      private bool? _isChecked = true;
+      private bool _isExpanded;
+      private bool _isUpdating;
+
+      public DiffTreeItem(string name, string relativePath, bool isDirectory, DiffDocument document, Action<DiffTreeItem> onCheckChanged)
+      {
+        Name = string.IsNullOrWhiteSpace(name) ? "(file)" : name;
+        RelativePath = relativePath ?? string.Empty;
+        IsDirectory = isDirectory;
+        Document = document;
+        _onCheckChanged = onCheckChanged;
+        Children = new ObservableCollection<DiffTreeItem>();
+        _isExpanded = isDirectory;
+      }
+
+      public event PropertyChangedEventHandler PropertyChanged;
+
+      public string Name { get; }
+      public string RelativePath { get; }
+      public bool IsDirectory { get; }
+      public DiffDocument Document { get; private set; }
+      public ObservableCollection<DiffTreeItem> Children { get; }
+      public DiffTreeItem Parent { get; private set; }
+
+      public bool? IsChecked
+      {
+        get => _isChecked;
+        set => SetIsChecked(value, updateChildren: true, updateParent: true);
+      }
+
+      public bool IsExpanded
+      {
+        get => _isExpanded;
+        set
+        {
+          if (_isExpanded == value)
+            return;
+          _isExpanded = value;
+          OnPropertyChanged(nameof(IsExpanded));
+        }
+      }
+
+      internal void SetParent(DiffTreeItem parent)
+      {
+        Parent = parent;
+      }
+
+      internal void SetDocument(DiffDocument document)
+      {
+        if (document == null)
+          return;
+        Document = document;
+      }
+
+      internal void SetIsChecked(bool? value, bool updateChildren, bool updateParent)
+      {
+        if (_isUpdating)
+          return;
+
+        if (_isChecked == value)
+        {
+          if (updateChildren && value.HasValue && IsDirectory)
+          {
+            foreach (var child in Children)
+              child.SetIsChecked(value, updateChildren: true, updateParent: false);
+          }
+          return;
+        }
+
+        _isUpdating = true;
+        try
+        {
+          _isChecked = value;
+          OnPropertyChanged(nameof(IsChecked));
+
+          if (updateChildren && value.HasValue && IsDirectory)
+          {
+            foreach (var child in Children)
+              child.SetIsChecked(value, updateChildren: true, updateParent: false);
+          }
+
+          if (updateParent && Parent != null)
+            Parent.SynchronizeCheckStateFromChildren();
+        }
+        finally
+        {
+          _isUpdating = false;
+        }
+
+        _onCheckChanged?.Invoke(this);
+      }
+
+      internal void SynchronizeCheckStateFromChildren()
+      {
+        if (!IsDirectory || Children.Count == 0)
+          return;
+
+        var allChecked = true;
+        var allUnchecked = true;
+
+        foreach (var child in Children)
+        {
+          var state = child.IsChecked;
+          if (state != true)
+            allChecked = false;
+          if (state != false)
+            allUnchecked = false;
+          if (!allChecked && !allUnchecked)
+            break;
+        }
+
+        bool? newValue = allChecked ? true : allUnchecked ? false : (bool?)null;
+        if (_isChecked != newValue)
+        {
+          _isChecked = newValue;
+          OnPropertyChanged(nameof(IsChecked));
+          _onCheckChanged?.Invoke(this);
+        }
+
+        Parent?.SynchronizeCheckStateFromChildren();
+      }
+
+      private void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static (List<DiffTreeItem> roots, int leafCount) BuildDiffTree(
+      IReadOnlyList<DiffDocument> docs,
+      Action<DiffTreeItem> onCheckChanged)
+    {
+      var roots = new List<DiffTreeItem>();
+      var map = new Dictionary<string, DiffTreeItem>(StringComparer.OrdinalIgnoreCase);
+      var leaves = 0;
+
+      foreach (var doc in docs)
+      {
+        var normalizedPath = NormalizeDiffPath(doc.Path);
+        var segments = SplitDiffPath(normalizedPath);
+        if (segments.Length == 0)
+          segments = new[] { string.IsNullOrEmpty(normalizedPath) ? "codex.diff" : normalizedPath };
+
+        DiffTreeItem parent = null;
+        string key = string.Empty;
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+          var segment = segments[i];
+          var isLast = i == segments.Length - 1;
+          key = string.IsNullOrEmpty(key) ? segment : $"{key}/{segment}";
+
+          if (!map.TryGetValue(key, out var node))
+          {
+            var relativePath = string.IsNullOrEmpty(normalizedPath) ? segment : key;
+            var document = isLast ? doc : null;
+            node = new DiffTreeItem(segment, relativePath, !isLast, document, onCheckChanged);
+            if (parent == null)
+              InsertDiffNodeInOrder(roots, node);
+            else
+              InsertDiffNodeInOrder(parent.Children, node);
+
+            node.SetParent(parent);
+            map[key] = node;
+          }
+          else if (isLast)
+          {
+            node.SetDocument(doc);
+          }
+
+          if (isLast)
+            leaves++;
+
+          parent = node;
+        }
+      }
+
+      return (roots, leaves);
+    }
+
+    private static void InsertDiffNodeInOrder(IList<DiffTreeItem> collection, DiffTreeItem node)
+    {
+      var index = 0;
+      while (index < collection.Count && CompareDiffNodes(collection[index], node) <= 0)
+        index++;
+      collection.Insert(index, node);
+    }
+
+    private static int CompareDiffNodes(DiffTreeItem left, DiffTreeItem right)
+    {
+      if (left == null && right == null)
+        return 0;
+      if (left == null)
+        return 1;
+      if (right == null)
+        return -1;
+      if (left.IsDirectory != right.IsDirectory)
+        return left.IsDirectory ? -1 : 1;
+      return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDiffPath(string path)
+    {
+      if (string.IsNullOrWhiteSpace(path))
+        return "codex.diff";
+
+      var normalized = path.Replace('\\', '/').Trim();
+      while (normalized.StartsWith("./", StringComparison.Ordinal))
+        normalized = normalized.Length > 2 ? normalized.Substring(2) : string.Empty;
+      normalized = normalized.Trim('/');
+      if (string.IsNullOrWhiteSpace(normalized))
+        normalized = Path.GetFileName(path) ?? "codex.diff";
+      return normalized;
+    }
+
+    private static string[] SplitDiffPath(string normalizedPath)
+    {
+      if (string.IsNullOrWhiteSpace(normalizedPath))
+        return Array.Empty<string>();
+      return normalizedPath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private void HandleDiffSelectionChanged(DiffTreeItem _)
+    {
+      if (_suppressDiffSelectionUpdate)
+        return;
+      UpdateDiffSelectionSummary();
+    }
+
+    private void UpdateDiffSelectionSummary()
+    {
+      if (_suppressDiffSelectionUpdate)
+        return;
+
+      if (this.FindName("DiffSelectionSummary") is not TextBlock summary)
+        return;
+
+      if (_diffTreeRoots == null || _diffTreeRoots.Count == 0)
+      {
+        summary.Text = string.Empty;
+        summary.Visibility = Visibility.Collapsed;
+        return;
+      }
+
+      var (selected, total) = CountSelectedDiffFiles();
+      if (total == 0)
+      {
+        summary.Text = string.Empty;
+        summary.Visibility = Visibility.Collapsed;
+        return;
+      }
+
+      summary.Text = $"Selected {selected} of {total} files.";
+      summary.Visibility = Visibility.Visible;
+    }
+
+    private (int selected, int total) CountSelectedDiffFiles()
+    {
+      var selected = 0;
+      var total = 0;
+
+      foreach (var root in _diffTreeRoots)
+        AccumulateDiffLeafCounts(root, ref selected, ref total);
+
+      return (selected, total);
+    }
+
+    private static void AccumulateDiffLeafCounts(DiffTreeItem item, ref int selected, ref int total)
+    {
+      if (item == null)
+        return;
+
+      if (!item.IsDirectory)
+      {
+        total++;
+        if (item.IsChecked == true)
+          selected++;
+        return;
+      }
+
+      foreach (var child in item.Children)
+        AccumulateDiffLeafCounts(child, ref selected, ref total);
+    }
+
+    private IReadOnlyList<DiffDocument> GetSelectedDiffDocuments()
+    {
+      var results = new List<DiffDocument>();
+      foreach (var root in _diffTreeRoots)
+        CollectSelectedDocuments(root, results);
+
+      if (results.Count == 0 && _diffDocuments.Count > 0)
+        results.AddRange(_diffDocuments.Values);
+
+      return results;
+    }
+
+    private static void CollectSelectedDocuments(DiffTreeItem item, ICollection<DiffDocument> results)
+    {
+      if (item == null)
+        return;
+
+      if (!item.IsDirectory)
+      {
+        if (item.IsChecked == true && item.Document != null)
+          results.Add(item.Document);
+        return;
+      }
+
+      foreach (var child in item.Children)
+        CollectSelectedDocuments(child, results);
+    }
+
+    private async Task<bool> ApplySelectedDiffsAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      var documents = GetSelectedDiffDocuments();
+      if (documents == null || documents.Count == 0)
+      {
+        await VS.StatusBar.ShowMessageAsync("No files selected for Codex patch.");
+        return false;
+      }
+
+      var applied = 0;
+      var failures = new List<string>();
+
+      foreach (var document in documents)
+      {
+        if (document == null || string.IsNullOrEmpty(document.Modified))
+        {
+          failures.Add(document?.Path ?? "(unknown)");
+          continue;
+        }
+
+        var fullPath = ResolveDiffFullPath(document.Path);
+        if (string.IsNullOrEmpty(fullPath))
+        {
+          failures.Add(document.Path);
+          continue;
+        }
+
+        try
+        {
+          if (await ApplyDocumentTextAsync(fullPath, document.Modified))
+            applied++;
+          else
+            failures.Add(fullPath);
+        }
+        catch (Exception ex)
+        {
+          failures.Add($"{fullPath}: {ex.Message}");
+        }
+      }
+
+      if (applied > 0)
+      {
+        var message = applied == 1
+          ? "Applied Codex patch to 1 file."
+          : $"Applied Codex patch to {applied} files.";
+        await VS.StatusBar.ShowMessageAsync(message);
+      }
+
+      if (failures.Count > 0)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        foreach (var failure in failures)
+          await pane.WriteLineAsync($"[error] Failed to apply Codex patch: {failure}");
+        await VS.StatusBar.ShowMessageAsync("Some Codex patches could not be applied. Check Diagnostics.");
+      }
+
+      return failures.Count == 0;
+    }
+
+    private async Task<bool> ApplyDocumentTextAsync(string fullPath, string newContent)
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      if (string.IsNullOrWhiteSpace(fullPath))
+        return false;
+
+      var normalizedPath = NormalizeDirectory(fullPath);
+      var directory = Path.GetDirectoryName(normalizedPath);
+      if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        Directory.CreateDirectory(directory);
+
+      if (!File.Exists(normalizedPath))
+        File.WriteAllText(normalizedPath, string.Empty, Encoding.UTF8);
+
+      var documentView = await VS.Documents.OpenAsync(normalizedPath);
+      var buffer = documentView?.TextBuffer;
+      var text = NormalizeFileContent(newContent);
+
+      if (buffer != null)
+      {
+        using var edit = buffer.CreateEdit();
+        edit.Replace(0, buffer.CurrentSnapshot.Length, text);
+        if (!edit.Apply())
+          return false;
+
+        if (buffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument textDocument))
+          textDocument?.MarkDirty();
+        return true;
+      }
+
+      File.WriteAllText(normalizedPath, text, Encoding.UTF8);
+      return true;
+    }
+
+    private string ResolveDiffFullPath(string path)
+    {
+      if (string.IsNullOrWhiteSpace(path))
+        return string.Empty;
+
+      if (Path.IsPathRooted(path))
+        return NormalizeDirectory(path);
+
+      var relative = ConvertDiffPathToPlatform(path);
+
+      foreach (var baseDir in new[] { _workingDir, _lastKnownWorkspaceRoot, _lastKnownSolutionRoot })
+      {
+        var candidate = CombineWithBaseDirectory(baseDir, relative);
+        if (!string.IsNullOrEmpty(candidate) && (File.Exists(candidate) || Directory.Exists(Path.GetDirectoryName(candidate) ?? string.Empty)))
+          return candidate;
+      }
+
+      var fallback = CombineWithBaseDirectory(_workingDir, relative);
+      return string.IsNullOrEmpty(fallback) ? NormalizeDirectory(relative) : fallback;
+    }
+
+    private static string CombineWithBaseDirectory(string baseDir, string relativePath)
+    {
+      if (string.IsNullOrWhiteSpace(relativePath))
+        return string.Empty;
+      if (string.IsNullOrWhiteSpace(baseDir))
+        return NormalizeDirectory(relativePath);
+
+      try
+      {
+        return NormalizeDirectory(Path.Combine(baseDir, relativePath));
+      }
+      catch
+      {
+        return NormalizeDirectory(relativePath);
+      }
+    }
+
+    private static string NormalizeFileContent(string content)
+    {
+      if (content == null)
+        return string.Empty;
+
+      var normalized = content.Replace("\r\n", "\n");
+      normalized = normalized.Replace("\r", "\n");
+      return normalized.Replace("\n", Environment.NewLine);
+    }
+
+    private static string ConvertDiffPathToPlatform(string path)
+    {
+      if (string.IsNullOrWhiteSpace(path))
+        return string.Empty;
+      var normalized = NormalizeDiffPath(path);
+      return normalized.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)
+    {
+      if (sender is not CheckBox checkBox || checkBox.DataContext is not DiffTreeItem item)
+        return;
+
+      var next = item.IsChecked != true;
+      _suppressDiffSelectionUpdate = true;
+      try
+      {
+        item.SetIsChecked(next, updateChildren: true, updateParent: true);
+      }
+      finally
+      {
+        _suppressDiffSelectionUpdate = false;
+      }
+
+      HandleDiffSelectionChanged(item);
+      e.Handled = true;
+    }
+
+    private static List<DiffDocument> ExtractDiffDocuments(JObject obj)
+    {
+      var results = new List<DiffDocument>();
+      if (obj == null)
+        return results;
+
+      if (obj["files"] is JArray filesArray)
+      {
+        foreach (var token in filesArray.OfType<JObject>())
+        {
+          var path = TryGetString(token, "path") ??
+                     TryGetString(token, "file") ??
+                     TryGetString(token, "relative_path") ??
+                     TryGetString(token, "filename") ??
+                     TryGetString(token, "target") ??
+                     string.Empty;
+
+          var original = ExtractDocumentText(token, new[] { "original", "previous", "before", "old", "base", "left" });
+          var modified = ExtractDocumentText(token, new[] { "text", "content", "after", "new", "current", "right" });
+
+          if (string.IsNullOrEmpty(modified))
+          {
+            modified = ExtractNestedText(token, "data", "text");
+            if (string.IsNullOrEmpty(modified))
+              continue;
+          }
+
+          if (string.IsNullOrEmpty(original))
+            original = string.Empty;
+
+          results.Add(new DiffDocument(path, original, modified));
+        }
+        return results;
+      }
+
+      var diffText = TryGetString(obj, "text") ?? TryGetString(obj, "diff") ?? TryGetString(obj, "patch");
+      if (!string.IsNullOrEmpty(diffText))
+        results.Add(new DiffDocument("codex.diff", string.Empty, diffText));
+
+      return results;
+    }
+
+    private static string ExtractDocumentText(JObject container, string[] keys)
+    {
+      if (container == null)
+        return string.Empty;
+
+      foreach (var key in keys)
+      {
+        if (container.TryGetValue(key, out var token))
+        {
+          var text = CollectTokenText(token);
+          if (!string.IsNullOrEmpty(text))
+            return text;
+        }
+
+        if (container[key] is JObject nested)
+        {
+          var text = TryGetString(nested, "text") ?? TryGetString(nested, "value");
+          if (!string.IsNullOrEmpty(text))
+            return text;
+        }
+      }
+
+      return string.Empty;
+    }
+
+    private static string ExtractNestedText(JObject parent, params string[] keys)
+    {
+      if (parent == null || keys == null || keys.Length == 0)
+        return string.Empty;
+
+      JToken current = parent;
+      foreach (var key in keys)
+      {
+        if (current is not JObject obj || !obj.TryGetValue(key, out current))
+          return string.Empty;
+      }
+
+      return CollectTokenText(current);
+    }
+
+    private static string CollectTokenText(JToken token)
+    {
+      if (token == null)
+        return string.Empty;
+
+      return token.Type switch
+      {
+        JTokenType.String => token.ToString(),
+        JTokenType.Object => TryGetString((JObject)token, "text") ?? TryGetString((JObject)token, "value") ?? string.Empty,
+        JTokenType.Array => string.Concat(token.Children().Select(CollectTokenText)),
+        _ => token.ToString()
+      };
+    }
+
+    private async Task ShowDiffAsync(DiffDocument doc)
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      IVsDifferenceService diffService;
+      try
+      {
+        diffService = await VS.GetRequiredServiceAsync<SVsDifferenceService, IVsDifferenceService>();
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Unable to acquire diff service: {ex.Message}");
+        return;
+      }
+
+      var originalFile = CreateTempDiffFile(doc.Path, doc.Original, "original");
+      var modifiedFile = CreateTempDiffFile(doc.Path, doc.Modified, "modified");
+
+      var caption = $"Codex Diff - {doc.Path}";
+      var tooltip = caption;
+      var originalLabel = $"{doc.Path} (current)";
+      var modifiedLabel = $"{doc.Path} (Codex)";
+
+      const __VSDIFFSERVICEOPTIONS options =
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary |
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_RightFileIsTemporary |
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_ForceNewWindow |
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_SuppressDiffNavigate;
+
+      try
+      {
+        diffService.OpenComparisonWindow2(
+          originalFile,
+          modifiedFile,
+          caption,
+          tooltip,
+          originalLabel,
+          modifiedLabel,
+          string.Empty,
+          string.Empty,
+          (uint)options);
+
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[diff] Opened diff for {doc.Path}");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Failed to open diff viewer for {doc.Path}: {ex.Message}");
+      }
+    }
+
+    private static string CreateTempDiffFile(string displayPath, string contents, string suffix)
+    {
+      var safeName = Path.GetFileName(displayPath);
+      if (string.IsNullOrEmpty(safeName))
+        safeName = "codex";
+
+      foreach (var invalid in Path.GetInvalidFileNameChars())
+        safeName = safeName.Replace(invalid, '_');
+
+      var dir = Path.Combine(Path.GetTempPath(), "CodexVS22", "Diffs");
+      Directory.CreateDirectory(dir);
+
+      var filePath = Path.Combine(dir, $"{safeName}.{suffix}.{Guid.NewGuid():N}.tmp");
+      File.WriteAllText(filePath, contents ?? string.Empty, Encoding.UTF8);
+      return filePath;
+    }
+
     private async Task UpdateFullAccessBannerAsync()
     {
       await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -3620,37 +4365,38 @@ namespace CodexVS22
       if (_assistantTurns.TryGetValue(id, out var turn))
         return turn;
 
-      var bubble = CreateAssistantBubble();
-      turn = new AssistantTurn(bubble);
-      AttachCopyContextMenu(bubble);
+      var elements = CreateAssistantBubble();
+      turn = new AssistantTurn(elements);
       _assistantTurns[id] = turn;
       return turn;
     }
 
-    private TextBlock CreateAssistantBubble()
-      => CreateChatBubble("assistant");
+    private ChatBubbleElements CreateAssistantBubble()
+      => CreateChatBubble("assistant", string.Empty, DateTime.UtcNow);
 
     private void AppendAssistantText(AssistantTurn turn, string delta, bool isFinal = false, bool decorate = true)
+    {
+      if (turn == null || string.IsNullOrEmpty(delta))
+        return;
+
+      if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
+        turn.Buffer.AppendLine();
+
+      turn.Buffer.Append(delta);
+      var cleaned = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
+      turn.Bubble.Text = cleaned;
+      UpdateBubbleAutomation(turn.Header, turn.Bubble, cleaned);
+      ScrollTranscriptToEnd();
+
+      if (!decorate)
+        return;
+
+      _assistantChunkCounter++;
+      if (!isFinal && _assistantChunkCounter % 5 == 0)
       {
-        if (turn == null || string.IsNullOrEmpty(delta))
-          return;
-
-        if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
-          turn.Buffer.AppendLine();
-
-        turn.Buffer.Append(delta);
-        var cleaned = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
-        turn.Bubble.Text = cleaned;
-
-        if (!decorate)
-          return;
-
-        _assistantChunkCounter++;
-        if (!isFinal && _assistantChunkCounter % 5 == 0)
-        {
-          turn.Bubble.Text += "\n";
-        }
+        turn.Bubble.Text += "\n";
       }
+    }
 
     private void AttachCopyContextMenu(TextBlock bubble)
     {
@@ -3711,7 +4457,7 @@ namespace CodexVS22
       }
     }
 
-    private TextBlock CreateChatBubble(string role, string initialText = "")
+    private ChatBubbleElements CreateChatBubble(string role, string initialText = "", DateTime? timestamp = null)
     {
       if (this.FindName("Transcript") is not StackPanel transcript)
         throw new InvalidOperationException("Transcript panel missing");
@@ -3727,6 +4473,9 @@ namespace CodexVS22
         _ => HorizontalAlignment.Left
       };
 
+      var when = (timestamp ?? DateTime.UtcNow).ToLocalTime();
+      var headerText = $"{GetRoleDisplayName(role)} — {when.ToString("t", CultureInfo.CurrentCulture)}";
+
       var container = new Border
       {
         CornerRadius = new CornerRadius(8),
@@ -3739,6 +4488,14 @@ namespace CodexVS22
       container.SetResourceReference(Border.BorderBrushProperty, VsBrushes.ToolWindowBorderKey);
       ApplyChatBubbleBrush(container, role);
 
+      var header = new TextBlock
+      {
+        Text = headerText,
+        FontWeight = FontWeights.SemiBold,
+        Margin = new Thickness(0, 0, 0, 4)
+      };
+      header.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
       var bubble = new TextBlock
       {
         Text = initialText,
@@ -3750,9 +4507,73 @@ namespace CodexVS22
       bubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
       AttachCopyContextMenu(bubble);
 
-      container.Child = bubble;
+      var layout = new StackPanel
+      {
+        Orientation = Orientation.Vertical
+      };
+      layout.Children.Add(header);
+      layout.Children.Add(bubble);
+
+      container.Child = layout;
       transcript.Children.Add(container);
-      return bubble;
+      UpdateBubbleAutomation(header, bubble, initialText);
+      ScrollTranscriptToEnd();
+
+      return new ChatBubbleElements(container, header, bubble);
+    }
+
+    private static string GetRoleDisplayName(string role)
+      => string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase) ? "Codex" : "You";
+
+    private void UpdateBubbleAutomation(TextBlock header, TextBlock bubble, string bodyText)
+    {
+      if (header == null || bubble == null)
+        return;
+
+      var sanitized = string.IsNullOrWhiteSpace(bodyText)
+        ? string.Empty
+        : bodyText.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+      var name = string.IsNullOrWhiteSpace(sanitized)
+        ? header.Text ?? string.Empty
+        : $"{header.Text}: {sanitized}";
+
+      AutomationProperties.SetName(bubble, name);
+      AutomationProperties.SetName(header, header.Text ?? string.Empty);
+
+      if (header.Parent is FrameworkElement element)
+        AutomationProperties.SetName(element, name);
+    }
+
+    private void ScrollTranscriptToEnd()
+    {
+      if (this.FindName("TranscriptScrollViewer") is not ScrollViewer viewer)
+        return;
+
+      viewer.Dispatcher.BeginInvoke(new Action(() =>
+      {
+        viewer.UpdateLayout();
+        viewer.ScrollToEnd();
+      }), DispatcherPriority.Background);
+    }
+
+    private void ResetTranscript(bool includeWelcome = true)
+    {
+      if (this.FindName("Transcript") is not StackPanel transcript)
+        return;
+
+      transcript.Children.Clear();
+
+      if (!includeWelcome)
+        return;
+
+      var welcome = new TextBlock
+      {
+        Text = "Welcome to Codex for Visual Studio",
+        TextWrapping = TextWrapping.Wrap
+      };
+      welcome.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+      transcript.Children.Add(welcome);
     }
 
     private ExecTurn CreateExecTurn(string headerText, string normalizedCommand)

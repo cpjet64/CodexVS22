@@ -4,6 +4,7 @@ global using System;
 global using Task = System.Threading.Tasks.Task;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Collections.Generic;
 
 namespace CodexVS22
 {
@@ -22,16 +23,58 @@ namespace CodexVS22
 
             this.RegisterToolWindows();
 
-            // Optionally open tool window on startup if configured
             try
             {
                 OptionsInstance = (CodexOptions)GetDialogPage(typeof(CodexOptions));
-                if (OptionsInstance.OpenOnStartup)
+            }
+            catch
+            {
+                OptionsInstance = new CodexOptions();
+            }
+
+            await InitializeEnvironmentAsync(cancellationToken);
+
+            if (OptionsInstance != null && OptionsInstance.OpenOnStartup)
+            {
+                try
                 {
                     await MyToolWindow.ShowAsync();
                 }
+                catch
+                {
+                    // ignore failures opening the tool window on startup
+                }
             }
-            catch { /* ignore option load errors */ }
+        }
+
+        private async Task InitializeEnvironmentAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+                var solutionContext = KnownUIContexts.SolutionExistsAndFullyLoadedContext;
+                var folderContext = MyToolWindowControl.TryGetFolderOpenUIContext();
+
+                var tasks = new List<Task>
+                {
+                    MyToolWindowControl.WaitForUiContextAsync(solutionContext, cancellationToken)
+                };
+
+                if (folderContext != null)
+                    tasks.Add(MyToolWindowControl.WaitForUiContextAsync(folderContext, cancellationToken));
+
+                var grace = Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+
+                await Task.WhenAny(Task.WhenAll(tasks), grace);
+
+                var snapshot = await MyToolWindowControl.CaptureEnvironmentSnapshotAsync(cancellationToken);
+                MyToolWindowControl.SignalEnvironmentReady(snapshot);
+            }
+            catch
+            {
+                MyToolWindowControl.SignalEnvironmentReady(MyToolWindowControl.EnvironmentSnapshot.Empty);
+            }
         }
     }
 }

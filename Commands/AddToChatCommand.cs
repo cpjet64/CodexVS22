@@ -3,6 +3,7 @@ using Community.VisualStudio.Toolkit;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
+using CodexVS22.Core;
 
 namespace CodexVS22
 {
@@ -19,7 +20,7 @@ namespace CodexVS22
       if (string.IsNullOrWhiteSpace(text))
       {
         // Inform the user instead of silently disabling the command
-        var pane = await VS.Windows.CreateOutputWindowPaneAsync("Codex Diagnostics", false);
+        var pane = await DiagnosticsPane.GetAsync();
         await pane.WriteLineAsync("[info] No selection detected. Select text then run Add to Codex chat.");
         return;
       }

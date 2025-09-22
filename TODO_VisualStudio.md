@@ -60,21 +60,15 @@ Execution Order
 
 ## T4. Tool Window chat UI
 - [x] [T4.1] Create WPF Tool Window layout with header, transcript, and input box.
-- [ ] [T4.2] Add model and reasoning selectors; persist choices to Options.
 - [x] [T4.2] Add model and reasoning selectors; persist choices to Options.
 - [x] [T4.3] Submit user_input ops from Send button and Ctrl+Enter.
-- [ ] [T4.4] Append user bubbles; stream assistant tokens into a live bubble.
+- [x] [T4.4] Append user bubbles; stream assistant tokens into a live bubble.
 - [x] [T4.5] Disable Send while a turn is active; re-enable on TaskComplete.
-- [ ] [T4.6] Add Clear Chat with confirmation dialog to avoid accidental loss.
-- [ ] [T4.7] Add Copy to Clipboard per message and Copy All in transcript.
+- [x] [T4.6] Add Clear Chat with confirmation dialog to avoid accidental loss.
 - [x] [T4.7] Add Copy to Clipboard per message and Copy All in transcript.
-- [ ] [T4.8] Add accessibility labels and keyboard navigation for controls.
 - [x] [T4.8] Add accessibility labels and keyboard navigation for controls.
-- [ ] [T4.9] Show a small spinner or status text while streaming.
 - [x] [T4.9] Show a small spinner or status text while streaming.
-- [ ] [T4.10] Persist window state and last size across sessions.
 - [x] [T4.10] Persist window state and last size across sessions.
-- [ ] [T4.11] Telemetry: count chats, average tokens/sec, average turn time.
 - [x] [T4.11] Telemetry: count chats, average tokens/sec, average turn time.
 - [x] [T4.12] Post-test: long inputs, non-ASCII, and paste flows behave correctly.
 
@@ -90,13 +84,13 @@ Execution Order
 - [x] [T5.9] Make approval prompts non-blocking and focus-safe.
 - [x] [T5.10] Unit-test mapping from request events to approval submissions.
 - [x] [T5.11] Persist last approval mode in Options and restore at startup.
-- [ ] [T5.12] Post-test: repeated prompts honor remembered decisions.
+- [x] [T5.12] Post-test: repeated prompts honor remembered decisions.
 
 ## T6. Diff preview and apply
 - [x] [T6.1] Parse TurnDiff unified diff into file→hunks data structures.
-- [ ] [T6.2] Render side-by-side diffs using Visual Studio diff services.
-- [ ] [T6.3] Show a tree of files with checkboxes to include/exclude patches.
-- [ ] [T6.4] Apply edits using ITextBuffer / ITextEdit transactions per file.
+- [x] [T6.2] Render side-by-side diffs using Visual Studio diff services.
+- [x] [T6.3] Show a tree of files with checkboxes to include/exclude patches.
+- [x] [T6.4] Apply edits using ITextBuffer / ITextEdit transactions per file.
 - [ ] [T6.5] Show progress (PatchApplyBegin) and final result (PatchApplyEnd).
 - [ ] [T6.6] Offer Discard Patch to abandon changes and close the turn.
 - [ ] [T6.7] Auto-open changed files option in Options page.
