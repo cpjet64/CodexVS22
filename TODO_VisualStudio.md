@@ -104,7 +104,7 @@ Execution Order
 - [x] [T7.1] Create a console panel for ExecCommandBegin with command and cwd header.
 - [x] [T7.2] Append ExecCommandOutputDelta chunks to the console view.
 - [x] [T7.3] On ExecCommandEnd show exit code, duration, and summary line.
-- [ ] [T7.4] Add Cancel action if the CLI supports aborting the command.
+- [x] [T7.4] Add Cancel action if the CLI supports aborting the command.
 - [ ] [T7.5] Implement basic ANSI color interpretation for readability.
 - [ ] [T7.6] Add Copy All and Clear Output actions on the console.
 - [ ] [T7.7] Auto-open console when exec starts; hide when finished (option).

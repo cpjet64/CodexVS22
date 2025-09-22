@@ -148,17 +148,21 @@ namespace CodexVS22
 
     private sealed class ExecTurn
     {
-      public ExecTurn(Border container, TextBlock body, TextBlock header, string normalizedCommand)
+      public ExecTurn(Border container, TextBlock body, TextBlock header, Button cancelButton, string normalizedCommand)
       {
         Container = container;
         Body = body;
         Header = header;
+        CancelButton = cancelButton;
         NormalizedCommand = normalizedCommand;
       }
 
       public Border Container { get; }
       public TextBlock Body { get; }
       public TextBlock Header { get; }
+      public Button CancelButton { get; }
+      public string ExecId { get; set; } = string.Empty;
+      public bool CancelRequested { get; set; }
       public string NormalizedCommand { get; set; }
       public StringBuilder Buffer { get; } = new StringBuilder();
     }
@@ -1043,6 +1047,8 @@ namespace CodexVS22
         _execTurns[canonicalId] = turn;
         _lastExecFallbackId = canonicalId;
 
+        UpdateExecCancelState(turn, running: true);
+
         var updatedHeader = turn.Header?.Text ?? header;
         if (!string.IsNullOrEmpty(updatedHeader) &&
             (string.IsNullOrEmpty(previousHeader) || !string.Equals(previousHeader, updatedHeader, StringComparison.Ordinal)))
@@ -1116,6 +1122,7 @@ namespace CodexVS22
         if (_execTurns.TryGetValue(execId, out var turn))
         {
           AppendExecText(turn, "$ exec finished\n");
+          UpdateExecCancelState(turn, running: false);
           _execTurns.Remove(execId);
           if (!string.IsNullOrEmpty(turn.NormalizedCommand) &&
               _execCommandIndex.TryGetValue(turn.NormalizedCommand, out var mappedId) &&
@@ -4603,6 +4610,33 @@ namespace CodexVS22
       }
     }
 
+    private async void OnExecCancelClick(object sender, RoutedEventArgs e)
+    {
+      if (sender is not Button button)
+        return;
+
+      var execId = button.Tag as string;
+      if (string.IsNullOrEmpty(execId))
+        return;
+
+      button.IsEnabled = false;
+      if (_execTurns.TryGetValue(execId, out var turn))
+        turn.CancelRequested = true;
+
+      if (this.FindName("StatusText") is TextBlock status)
+        status.Text = "Cancelling exec...";
+
+      var ok = await SendExecCancelAsync(execId);
+      if (!ok)
+      {
+        if (_execTurns.TryGetValue(execId, out var retryTurn))
+          retryTurn.CancelRequested = false;
+        button.IsEnabled = true;
+        if (this.FindName("StatusText") is TextBlock statusRetry)
+          statusRetry.Text = "Exec cancel failed";
+      }
+    }
+
     private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)
     {
       if (sender is not CheckBox checkBox || checkBox.DataContext is not DiffTreeItem item)
@@ -4823,6 +4857,25 @@ namespace CodexVS22
       if (!text.EndsWith("\n", StringComparison.Ordinal))
         turn.Buffer.Append('\n');
       turn.Body.Text = turn.Buffer.ToString();
+    }
+
+    private void UpdateExecCancelState(ExecTurn turn, bool running)
+    {
+      if (turn?.CancelButton == null)
+        return;
+
+      if (running)
+      {
+        turn.CancelRequested = false;
+        turn.CancelButton.Visibility = Visibility.Visible;
+        turn.CancelButton.IsEnabled = true;
+      }
+      else
+      {
+        turn.CancelButton.Visibility = Visibility.Collapsed;
+        turn.CancelButton.IsEnabled = true;
+        turn.CancelRequested = false;
+      }
     }
 
     private AssistantTurn GetOrCreateAssistantTurn(string id)
@@ -5060,18 +5113,58 @@ namespace CodexVS22
       var panel = new StackPanel();
       var headerTextValue = string.IsNullOrWhiteSpace(headerText) ? "$ exec" : headerText.Trim();
       TextBlock headerBlock = null;
+      Button cancelButton = null;
 
       if (!string.IsNullOrEmpty(headerTextValue))
       {
+        var headerRow = new StackPanel
+        {
+          Orientation = Orientation.Horizontal,
+          VerticalAlignment = VerticalAlignment.Center
+        };
+
         headerBlock = new TextBlock
         {
           Text = headerTextValue,
           FontWeight = FontWeights.SemiBold,
           TextWrapping = TextWrapping.Wrap,
-          Margin = new Thickness(0, 0, 0, 4)
+          Margin = new Thickness(0, 0, 0, 4),
+          VerticalAlignment = VerticalAlignment.Center
         };
         headerBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-        panel.Children.Add(headerBlock);
+
+        cancelButton = new Button
+        {
+          Content = new AccessText { Text = "_Cancel" },
+          Margin = new Thickness(8, 0, 0, 4),
+          MinWidth = 70,
+          Height = 24,
+          Visibility = Visibility.Collapsed,
+          HorizontalAlignment = HorizontalAlignment.Left
+        };
+        cancelButton.Click += OnExecCancelClick;
+
+        headerRow.Children.Add(headerBlock);
+        headerRow.Children.Add(cancelButton);
+        panel.Children.Add(headerRow);
+      }
+
+      cancelButton ??= new Button
+      {
+        Visibility = Visibility.Collapsed,
+        IsEnabled = false
+      };
+
+      if (headerBlock == null)
+      {
+        var buttonRow = new StackPanel
+        {
+          Orientation = Orientation.Horizontal,
+          HorizontalAlignment = HorizontalAlignment.Left,
+          Margin = new Thickness(0, 0, 0, 4)
+        };
+        buttonRow.Children.Add(cancelButton);
+        panel.Children.Add(buttonRow);
       }
 
       var bodyBlock = new TextBlock
@@ -5089,7 +5182,7 @@ namespace CodexVS22
       container.Child = panel;
       transcript.Children.Add(container);
 
-      return new ExecTurn(container, bodyBlock, headerBlock, normalizedCommand);
+      return new ExecTurn(container, bodyBlock, headerBlock, cancelButton, normalizedCommand);
     }
 
     private ExecTurn GetOrCreateExecTurn(string id, string header, string normalizedCommand)
@@ -5107,6 +5200,10 @@ namespace CodexVS22
         if (string.IsNullOrEmpty(turn.Header.Text) || string.Equals(turn.Header.Text, "$ exec", StringComparison.Ordinal))
           turn.Header.Text = header;
       }
+
+      turn.ExecId = id;
+      if (turn.CancelButton != null)
+        turn.CancelButton.Tag = id;
 
       if (!string.IsNullOrEmpty(normalizedCommand) && string.IsNullOrEmpty(turn.NormalizedCommand))
         turn.NormalizedCommand = normalizedCommand;
@@ -5415,6 +5512,40 @@ namespace CodexVS22
 
       if (!fromRetry && this.FindName("InputBox") is TextBox input)
         input.Clear();
+    }
+
+    private async Task<bool> SendExecCancelAsync(string execId)
+    {
+      var host = _host;
+      if (host == null || string.IsNullOrEmpty(execId))
+        return false;
+
+      var submission = new JObject
+      {
+        ["id"] = Guid.NewGuid().ToString(),
+        ["op"] = new JObject
+        {
+          ["type"] = "exec_cancel",
+          ["id"] = execId,
+          ["call_id"] = execId
+        }
+      };
+
+      var json = submission.ToString(Formatting.None);
+      var pane = await DiagnosticsPane.GetAsync();
+      await pane.WriteLineAsync($"[debug] exec cancel submission {json}");
+
+      var ok = await host.SendAsync(json);
+      if (ok)
+      {
+        await pane.WriteLineAsync($"[info] Requested cancel for exec {execId}");
+      }
+      else
+      {
+        await pane.WriteLineAsync($"[warn] Failed to send exec cancel for {execId}");
+      }
+
+      return ok;
     }
 
     private void OnStreamRetryClick(object sender, RoutedEventArgs e)
