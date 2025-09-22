@@ -22,6 +22,8 @@ internal static class Program
     RunTest(nameof(NormalizeAssistantText_NormalizesSmartQuotes), NormalizeAssistantText_NormalizesSmartQuotes);
     RunTest(nameof(ExecApprovalSubmission_MatchesRequest), ExecApprovalSubmission_MatchesRequest);
     RunTest(nameof(PatchApprovalSubmission_MatchesRequest), PatchApprovalSubmission_MatchesRequest);
+    RunTest(nameof(RememberedExecApprovals_AreHonored), RememberedExecApprovals_AreHonored);
+    RunTest(nameof(RememberedPatchApprovals_AreHonored), RememberedPatchApprovals_AreHonored);
 
     if (Failures.Count == 0)
     {
@@ -155,6 +157,22 @@ internal static class Program
     AssertEqual("approved", obj["op"]?["decision"]?.ToString() ?? string.Empty, "Patch approved decision mismatch");
   }
 
+  private static void RememberedExecApprovals_AreHonored()
+  {
+    var resolver = new FakeApprovalResolver();
+    resolver.RememberExecDecision("dir", true);
+    AssertTrue(resolver.TryResolveExecApproval(autoApprove: false, "dir", out var approved), "Exec should resolve via remembered decision");
+    AssertTrue(approved, "Remembered exec decision mismatch");
+  }
+
+  private static void RememberedPatchApprovals_AreHonored()
+  {
+    var resolver = new FakeApprovalResolver();
+    resolver.RememberPatchDecision("file", false);
+    AssertTrue(resolver.TryResolvePatchApproval(autoApprove: false, "file", out var approved), "Patch should resolve via remembered decision");
+    AssertFalse(approved, "Remembered patch decision mismatch");
+  }
+
   private static void AssertEqual(string expected, string actual, string message)
   {
     if (!string.Equals(expected, actual, StringComparison.Ordinal))
@@ -164,6 +182,12 @@ internal static class Program
   private static void AssertFalse(bool condition, string message)
   {
     if (condition)
+      throw new InvalidOperationException(message);
+  }
+
+  private static void AssertTrue(bool condition, string message)
+  {
+    if (!condition)
       throw new InvalidOperationException(message);
   }
 
@@ -293,5 +317,54 @@ internal static class Program
 
       return string.Empty;
     }
+  }
+}
+internal sealed class FakeApprovalResolver
+{
+  private readonly Dictionary<string, bool> _exec = new(StringComparer.Ordinal);
+  private readonly Dictionary<string, bool> _patch = new(StringComparer.Ordinal);
+
+  public void RememberExecDecision(string signature, bool approved)
+  {
+    if (string.IsNullOrWhiteSpace(signature))
+      return;
+    _exec[signature] = approved;
+  }
+
+  public void RememberPatchDecision(string signature, bool approved)
+  {
+    if (string.IsNullOrWhiteSpace(signature))
+      return;
+    _patch[signature] = approved;
+  }
+
+  public bool TryResolveExecApproval(bool autoApprove, string signature, out bool approved)
+  {
+    if (autoApprove)
+    {
+      approved = true;
+      return true;
+    }
+
+    if (!string.IsNullOrWhiteSpace(signature) && _exec.TryGetValue(signature, out approved))
+      return true;
+
+    approved = false;
+    return false;
+  }
+
+  public bool TryResolvePatchApproval(bool autoApprove, string signature, out bool approved)
+  {
+    if (autoApprove)
+    {
+      approved = true;
+      return true;
+    }
+
+    if (!string.IsNullOrWhiteSpace(signature) && _patch.TryGetValue(signature, out approved))
+      return true;
+
+    approved = false;
+    return false;
   }
 }
