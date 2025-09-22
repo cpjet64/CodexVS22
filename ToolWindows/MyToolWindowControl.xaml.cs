@@ -1151,9 +1151,20 @@ namespace CodexVS22
           return;
         }
 
-        await UpdateDiffTreeAsync(docs);
+        var filtered = await ProcessDiffDocumentsAsync(docs);
+        if (filtered.Count == 0)
+        {
+          await UpdateDiffTreeAsync(filtered);
+          var pane = await DiagnosticsPane.GetAsync();
+          await pane.WriteLineAsync("[info] Codex diff contained no textual changes after filtering.");
+          if (this.FindName("StatusText") is TextBlock status)
+            status.Text = "Codex diff contained no textual changes.";
+          return;
+        }
 
-        foreach (var doc in docs)
+        await UpdateDiffTreeAsync(filtered);
+
+        foreach (var doc in filtered)
           await ShowDiffAsync(doc);
       }
       catch (Exception ex)
@@ -1206,6 +1217,33 @@ namespace CodexVS22
       }
 
       UpdateDiffSelectionSummary();
+    }
+
+    private async Task<List<DiffDocument>> ProcessDiffDocumentsAsync(IReadOnlyList<DiffDocument> docs)
+    {
+      var filtered = new List<DiffDocument>();
+      if (docs == null)
+        return filtered;
+
+      var pane = await DiagnosticsPane.GetAsync();
+      foreach (var doc in docs)
+      {
+        if (doc.IsBinary)
+        {
+          await pane.WriteLineAsync($"[warn] Skipping binary diff for {doc.Path}; manual review recommended.");
+          continue;
+        }
+
+        if (doc.IsEmpty)
+        {
+          await pane.WriteLineAsync($"[info] Empty diff for {doc.Path}; nothing to display.");
+          continue;
+        }
+
+        filtered.Add(doc);
+      }
+
+      return filtered;
     }
 
     private async void HandleTaskComplete(EventMsg evt)
@@ -4400,6 +4438,12 @@ namespace CodexVS22
       if (!File.Exists(normalizedPath))
         File.WriteAllText(normalizedPath, string.Empty, Encoding.UTF8);
 
+      if (IsFileReadOnly(normalizedPath))
+      {
+        await LogPatchReadOnlyAsync(normalizedPath);
+        return PatchApplyResult.Failed;
+      }
+
       DocumentView documentView = null;
       if (openDocument)
       {
@@ -4439,6 +4483,12 @@ namespace CodexVS22
         {
           return PatchApplyResult.Conflict;
         }
+      }
+
+      if (documentView?.Document?.IsReadOnly == true)
+      {
+        await LogPatchReadOnlyAsync(normalizedPath);
+        return PatchApplyResult.Failed;
       }
 
       if (buffer != null)
@@ -4525,6 +4575,32 @@ namespace CodexVS22
         return string.Empty;
       var normalized = NormalizeDiffPath(path);
       return normalized.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    private static bool IsFileReadOnly(string path)
+    {
+      try
+      {
+        var info = new FileInfo(path);
+        return info.Exists && info.IsReadOnly;
+      }
+      catch
+      {
+        return false;
+      }
+    }
+
+    private static async Task LogPatchReadOnlyAsync(string path)
+    {
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[warn] Skipping patch for {path}: file is read-only or locked.");
+      }
+      catch
+      {
+        // diagnostics best effort
+      }
     }
 
     private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)

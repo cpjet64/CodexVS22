@@ -16,11 +16,15 @@ namespace CodexVS22.Core
         Path = string.IsNullOrWhiteSpace(path) ? "(untitled)" : path;
         Original = original ?? string.Empty;
         Modified = modified ?? string.Empty;
+        IsEmpty = string.IsNullOrWhiteSpace(Original) && string.IsNullOrWhiteSpace(Modified);
+        IsBinary = LooksBinary(Original) || LooksBinary(Modified);
       }
 
       public string Path { get; }
       public string Original { get; }
       public string Modified { get; }
+      public bool IsEmpty { get; }
+      public bool IsBinary { get; }
     }
 
     internal enum PatchApplyResult
@@ -51,16 +55,12 @@ namespace CodexVS22.Core
           var modified = ExtractDocumentText(token, new[] { "text", "content", "after", "new", "current", "right" });
 
           if (string.IsNullOrEmpty(modified))
-          {
             modified = ExtractNestedText(token, "data", "text");
-            if (string.IsNullOrEmpty(modified))
-              continue;
-          }
 
           if (string.IsNullOrEmpty(original))
             original = string.Empty;
 
-          results.Add(new DiffDocument(path, original, modified));
+          results.Add(new DiffDocument(path, original, modified ?? string.Empty));
         }
         return results;
       }
@@ -99,6 +99,20 @@ namespace CodexVS22.Core
         throw new ArgumentException("Path must be provided", nameof(path));
 
       var current = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+      if (File.Exists(path))
+      {
+        try
+        {
+          var info = new FileInfo(path);
+          if (info.IsReadOnly)
+            return PatchApplyResult.Failed;
+        }
+        catch
+        {
+          // treat errors as failure to avoid modification
+          return PatchApplyResult.Failed;
+        }
+      }
       if (!string.IsNullOrEmpty(original))
       {
         var normalizedCurrent = NormalizeForComparison(current);
@@ -141,6 +155,27 @@ namespace CodexVS22.Core
       }
 
       return current?.ToString() ?? string.Empty;
+    }
+
+    private static bool LooksBinary(string content)
+    {
+      if (string.IsNullOrEmpty(content))
+        return false;
+
+      var sampleLength = Math.Min(content.Length, 512);
+      var controlCount = 0;
+
+      for (var i = 0; i < sampleLength; i++)
+      {
+        var ch = content[i];
+        if (ch == '\0')
+          return true;
+
+        if (char.IsControl(ch) && ch != '\r' && ch != '\n' && ch != '\t')
+          controlCount++;
+      }
+
+      return controlCount > sampleLength * 0.1;
     }
   }
 }

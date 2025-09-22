@@ -27,8 +27,10 @@ internal static class Program
     RunTest(nameof(RememberedExecApprovals_AreHonored), RememberedExecApprovals_AreHonored);
     RunTest(nameof(RememberedPatchApprovals_AreHonored), RememberedPatchApprovals_AreHonored);
     RunTest(nameof(DiffParsing_WithFilesArray_ParsesDocuments), DiffParsing_WithFilesArray_ParsesDocuments);
+    RunTest(nameof(DiffParsing_MarksBinaryAndEmpty), DiffParsing_MarksBinaryAndEmpty);
     RunTest(nameof(PatchApply_WithMatchingOriginal_WritesFile), PatchApply_WithMatchingOriginal_WritesFile);
     RunTest(nameof(PatchApply_WithMismatchedOriginal_ReportsConflict), PatchApply_WithMismatchedOriginal_ReportsConflict);
+    RunTest(nameof(PatchApply_RespectsReadOnlyFiles), PatchApply_RespectsReadOnlyFiles);
 
     if (Failures.Count == 0)
     {
@@ -212,6 +214,32 @@ internal static class Program
     AssertEqual("new readme", docs[1].Modified, "Second diff modified mismatch");
   }
 
+  private static void DiffParsing_MarksBinaryAndEmpty()
+  {
+    var payload = new JObject
+    {
+      ["files"] = new JArray
+      {
+        new JObject
+        {
+          ["path"] = "src/binary.dat",
+          ["original"] = "\u0000\u0001",
+          ["text"] = "\u0000\u0002"
+        },
+        new JObject
+        {
+          ["path"] = "src/empty.txt",
+          ["original"] = "",
+          ["text"] = ""
+        }
+      }
+    };
+
+    var docs = DiffUtilities.ExtractDocuments(payload);
+    AssertTrue(docs[0].IsBinary, "Binary diff should be marked as binary");
+    AssertTrue(docs[1].IsEmpty, "Empty diff should be marked as empty");
+  }
+
   private static void PatchApply_WithMatchingOriginal_WritesFile()
   {
     var path = Path.Combine(Path.GetTempPath(), $"codex-test-{Guid.NewGuid():N}.txt");
@@ -240,6 +268,32 @@ internal static class Program
       if (result != DiffUtilities.PatchApplyResult.Conflict)
         throw new InvalidOperationException("Expected conflict when originals differ");
       AssertEqual(DiffUtilities.NormalizeForComparison("current\n"), DiffUtilities.NormalizeForComparison(File.ReadAllText(path)), "File should remain unchanged after conflict");
+    }
+    finally
+    {
+      if (File.Exists(path))
+        File.Delete(path);
+    }
+  }
+
+  private static void PatchApply_RespectsReadOnlyFiles()
+  {
+    var path = Path.Combine(Path.GetTempPath(), $"codex-test-{Guid.NewGuid():N}.txt");
+    try
+    {
+      File.WriteAllText(path, "locked\n");
+      var info = new FileInfo(path) { IsReadOnly = true };
+      try
+      {
+        var result = DiffUtilities.ApplyPatchToFileForTests(path, "locked\n", "edited\n");
+        if (result != DiffUtilities.PatchApplyResult.Failed)
+          throw new InvalidOperationException("Expected read-only patch to fail");
+        AssertEqual(DiffUtilities.NormalizeForComparison("locked\n"), DiffUtilities.NormalizeForComparison(File.ReadAllText(path)), "Read-only file should remain unchanged");
+      }
+      finally
+      {
+        info.IsReadOnly = false;
+      }
     }
     finally
     {

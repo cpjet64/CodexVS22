@@ -97,8 +97,8 @@ Execution Order
 - [x] [T6.8] Detect conflicts and warn; suggest manual merge if needed.
 - [x] [T6.9] Telemetry: record apply success/failure and duration.
 - [x] [T6.10] Unit tests on diff parsing and patch application on temp files.
-- [ ] [T6.11] Post-test: empty diffs and binary files handled gracefully.
-- [ ] [T6.12] Ensure edits respect read-only files and source control locks.
+- [x] [T6.11] Post-test: empty diffs and binary files handled gracefully.
+- [x] [T6.12] Ensure edits respect read-only files and source control locks.
 
 ## T7. Exec console
 - [x] [T7.1] Create a console panel for ExecCommandBegin with command and cwd header.
