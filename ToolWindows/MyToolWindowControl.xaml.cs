@@ -76,6 +76,7 @@ namespace CodexVS22
     private bool _initializingSelectors;
     private string _selectedModel = DefaultModelName;
     private string _selectedReasoning = DefaultReasoningValue;
+    private CodexOptions.ApprovalMode _selectedApprovalMode = CodexOptions.ApprovalMode.Chat;
     private Window _hostWindow;
     private bool _windowEventsHooked;
     private sealed class AssistantTurn
@@ -208,6 +209,13 @@ namespace CodexVS22
       "high"
     };
 
+    private static readonly CodexOptions.ApprovalMode[] ApprovalModeOptions =
+    {
+      CodexOptions.ApprovalMode.Chat,
+      CodexOptions.ApprovalMode.Agent,
+      CodexOptions.ApprovalMode.AgentFullAccess
+    };
+
     private const string DefaultModelName = "gpt-4.1";
     private const string DefaultReasoningValue = "medium";
 
@@ -227,6 +235,15 @@ namespace CodexVS22
       _initializingSelectors = true;
       try
       {
+        var approvalBox = this.FindName("ApprovalCombo") as ComboBox;
+        if (approvalBox != null)
+        {
+          approvalBox.SelectionChanged -= OnApprovalModeChanged;
+          var index = Array.IndexOf(ApprovalModeOptions, _selectedApprovalMode);
+          approvalBox.SelectedIndex = index >= 0 ? index : 0;
+          approvalBox.SelectionChanged += OnApprovalModeChanged;
+        }
+
         var modelBox = this.FindName("ModelCombo") as ComboBox;
         if (modelBox != null)
         {
@@ -311,6 +328,25 @@ namespace CodexVS22
       if (_options != null)
         _options.DefaultReasoning = normalized;
       QueueOptionSave();
+    }
+
+    private void OnApprovalModeChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+      if (_initializingSelectors)
+        return;
+
+      if (sender is not ComboBox combo || combo.SelectedIndex < 0 || combo.SelectedIndex >= ApprovalModeOptions.Length)
+        return;
+
+      var mode = ApprovalModeOptions[combo.SelectedIndex];
+      if (mode == _selectedApprovalMode)
+        return;
+
+      _selectedApprovalMode = mode;
+      if (_options != null)
+        _options.Mode = mode;
+      QueueOptionSave();
+      EnqueueFullAccessBannerRefresh();
     }
 
     private static void QueueOptionSave()
@@ -404,10 +440,12 @@ namespace CodexVS22
 
       _selectedModel = NormalizeModel(_options?.DefaultModel);
       _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
+      _selectedApprovalMode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
       if (_options != null)
       {
         _options.DefaultModel = _selectedModel;
         _options.DefaultReasoning = _selectedReasoning;
+        _options.Mode = _selectedApprovalMode;
       }
 
       await InitializeSelectorsAsync();
@@ -479,7 +517,7 @@ namespace CodexVS22
       DisposeHost();
       _rememberedExecApprovals.Clear();
       _rememberedPatchApprovals.Clear();
-       ClearApprovalState();
+      ClearApprovalState();
       _host = CreateHost();
       var options = _options ?? new CodexOptions();
       var dir = _workingDir ?? string.Empty;

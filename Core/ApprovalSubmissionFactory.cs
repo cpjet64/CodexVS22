@@ -8,7 +8,7 @@ namespace CodexVS22.Core
   {
     private static long _counter;
 
-    public static string CreateExec(string requestId, bool approved)
+    public static string CreateExec(string? requestId, bool approved)
     {
       var decision = approved ? "approved" : "denied";
       var callId = requestId ?? string.Empty;
@@ -32,7 +32,7 @@ namespace CodexVS22.Core
       return submission.ToString(Newtonsoft.Json.Formatting.None);
     }
 
-    public static string CreatePatch(string requestId, bool approved)
+    public static string CreatePatch(string? requestId, bool approved)
     {
       var decision = approved ? "approved" : "denied";
       var callId = requestId ?? string.Empty;
