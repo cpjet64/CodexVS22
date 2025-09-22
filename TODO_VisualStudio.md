@@ -61,6 +61,7 @@ Execution Order
 ## T4. Tool Window chat UI
 - [x] [T4.1] Create WPF Tool Window layout with header, transcript, and input box.
 - [ ] [T4.2] Add model and reasoning selectors; persist choices to Options.
+- [x] [T4.2] Add model and reasoning selectors; persist choices to Options.
 - [x] [T4.3] Submit user_input ops from Send button and Ctrl+Enter.
 - [ ] [T4.4] Append user bubbles; stream assistant tokens into a live bubble.
 - [x] [T4.5] Disable Send while a turn is active; re-enable on TaskComplete.

@@ -31,5 +31,15 @@ namespace CodexVS22
         [DisplayName("Approval Mode")]
         [Description("Chat, Agent, or Agent (Full Access) for exec/patch.")]
         public ApprovalMode Mode { get; set; } = ApprovalMode.Chat;
+
+        [Category("Codex")]
+        [DisplayName("Default Model")]
+        [Description("Model identifier to request for new chats.")]
+        public string DefaultModel { get; set; } = "gpt-4.1";
+
+        [Category("Codex")]
+        [DisplayName("Default Reasoning Effort")]
+        [Description("Reasoning effort to request (none, medium, high).")]
+        public string DefaultReasoning { get; set; } = "medium";
     }
 }

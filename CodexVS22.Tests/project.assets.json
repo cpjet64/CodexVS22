@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "targets": {
+    "net8.0": {}
+  },
+  "libraries": {},
+  "projectFileDependencyGroups": {
+    "": [],
+    "net8.0": []
+  },
+  "packageFolders": {},
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "CodexVS22.Tests",
+      "projectName": "CodexVS22.Tests",
+      "projectPath": "CodexVS22.Tests/CodexVS22.Tests.csproj",
+      "packagesPath": "packages",
+      "outputPath": "CodexVS22.Tests/obj",
+      "projectStyle": "None",
+      "originalTargetFrameworks": [
+        "net8.0"
+      ],
+      "sources": [],
+      "frameworks": {
+        "net8.0": {
+          "projectReferences": {}
+        }
+      }
+    },
+    "frameworks": {
+      "net8.0": {
+        "dependencies": {},
+        "assetTargetFallback": false,
+        "warn": false
+      }
+    }
+  }
+}

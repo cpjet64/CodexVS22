@@ -68,6 +68,9 @@ namespace CodexVS22
     private Timer _heartbeatTimer;
     private HeartbeatState _heartbeatState;
     private int _heartbeatSending;
+    private bool _initializingSelectors;
+    private string _selectedModel = DefaultModelName;
+    private string _selectedReasoning = DefaultReasoningValue;
     private sealed class AssistantTurn
     {
       public AssistantTurn(TextBlock bubble)
@@ -160,6 +163,23 @@ namespace CodexVS22
       public string OpType { get; }
     }
 
+    private static readonly string[] ModelOptions = new[]
+    {
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "o1-mini"
+    };
+
+    private static readonly string[] ReasoningOptions = new[]
+    {
+      "none",
+      "medium",
+      "high"
+    };
+
+    private const string DefaultModelName = "gpt-4.1";
+    private const string DefaultReasoningValue = "medium";
+
     private static bool IsInsideExtensionRoot(string path)
     {
       var normalized = NormalizeDirectory(path);
@@ -167,6 +187,119 @@ namespace CodexVS22
         return false;
 
       return normalized.StartsWith(ExtensionRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task InitializeSelectorsAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      _initializingSelectors = true;
+      try
+      {
+        var modelBox = this.FindName("ModelCombo") as ComboBox;
+        if (modelBox != null)
+        {
+          modelBox.SelectionChanged -= OnModelSelectionChanged;
+          modelBox.ItemsSource = ModelOptions;
+          _selectedModel = NormalizeModel(_options?.DefaultModel);
+          modelBox.SelectedItem = _selectedModel;
+          modelBox.SelectionChanged += OnModelSelectionChanged;
+        }
+
+        var reasoningBox = this.FindName("ReasoningCombo") as ComboBox;
+        if (reasoningBox != null)
+        {
+          reasoningBox.SelectionChanged -= OnReasoningSelectionChanged;
+          reasoningBox.ItemsSource = ReasoningOptions;
+          _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
+          reasoningBox.SelectedItem = _selectedReasoning;
+          reasoningBox.SelectionChanged += OnReasoningSelectionChanged;
+        }
+      }
+      finally
+      {
+        _initializingSelectors = false;
+      }
+    }
+
+    private static string NormalizeModel(string value)
+    {
+      if (string.IsNullOrWhiteSpace(value))
+        return DefaultModelName;
+
+      foreach (var option in ModelOptions)
+      {
+        if (string.Equals(option, value, StringComparison.OrdinalIgnoreCase))
+          return option;
+      }
+
+      return DefaultModelName;
+    }
+
+    private static string NormalizeReasoning(string value)
+    {
+      if (string.IsNullOrWhiteSpace(value))
+        return DefaultReasoningValue;
+
+      foreach (var option in ReasoningOptions)
+      {
+        if (string.Equals(option, value, StringComparison.OrdinalIgnoreCase))
+          return option;
+      }
+
+      return DefaultReasoningValue;
+    }
+
+    private void OnModelSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+      if (_initializingSelectors)
+        return;
+
+      var selected = (sender as ComboBox)?.SelectedItem as string;
+      var normalized = NormalizeModel(selected ?? string.Empty);
+      if (string.Equals(normalized, _selectedModel, StringComparison.Ordinal))
+        return;
+
+      _selectedModel = normalized;
+      if (_options != null)
+        _options.DefaultModel = normalized;
+      QueueOptionSave();
+    }
+
+    private void OnReasoningSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+      if (_initializingSelectors)
+        return;
+
+      var selected = (sender as ComboBox)?.SelectedItem as string;
+      var normalized = NormalizeReasoning(selected ?? string.Empty);
+      if (string.Equals(normalized, _selectedReasoning, StringComparison.Ordinal))
+        return;
+
+      _selectedReasoning = normalized;
+      if (_options != null)
+        _options.DefaultReasoning = normalized;
+      QueueOptionSave();
+    }
+
+    private static void QueueOptionSave()
+    {
+      var options = CodexVS22Package.OptionsInstance;
+      if (options == null)
+        return;
+
+      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+      {
+        try
+        {
+          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+          options.SaveSettingsToStorage();
+        }
+        catch
+        {
+          // ignore persistence failures; options page will handle fallback
+        }
+      });
     }
     public MyToolWindowControl()
     {
@@ -237,6 +370,16 @@ namespace CodexVS22
       Current = this;
       _options = CodexVS22Package.OptionsInstance ?? new CodexOptions();
       _host = CreateHost();
+
+      _selectedModel = NormalizeModel(_options?.DefaultModel);
+      _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
+      if (_options != null)
+      {
+        _options.DefaultModel = _selectedModel;
+        _options.DefaultReasoning = _selectedReasoning;
+      }
+
+      await InitializeSelectorsAsync();
 
       await AdviseSolutionEventsAsync();
 
@@ -511,6 +654,8 @@ namespace CodexVS22
       }
     }
 
+    private int _assistantChunkCounter;
+
     private async void HandleAgentMessageDelta(EventMsg evt)
     {
       try
@@ -522,9 +667,7 @@ namespace CodexVS22
           return;
 
         var turn = GetOrCreateAssistantTurn(id);
-        turn.Buffer.Append(text);
-        var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
-        turn.Bubble.Text = cleaned;
+        AppendAssistantText(turn, text);
       }
       catch (Exception ex)
       {
@@ -550,14 +693,15 @@ namespace CodexVS22
         if (!string.IsNullOrEmpty(finalText))
         {
           turn.Buffer.Clear();
-          turn.Buffer.Append(finalText);
+          AppendAssistantText(turn, finalText, isFinal: true);
+        }
+        else
+        {
+          turn.Bubble.Text = NormalizeAssistantText(turn.Buffer.ToString());
         }
 
-        var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
-        turn.Bubble.Text = cleaned;
         _assistantTurns.Remove(id);
-
-        await LogAssistantTextAsync(cleaned);
+        await LogAssistantTextAsync(turn.Bubble.Text);
       }
       catch (Exception ex)
       {
@@ -596,8 +740,7 @@ namespace CodexVS22
           {
             if (turn.Buffer.Length > 0)
               turn.Buffer.AppendLine().AppendLine();
-            turn.Buffer.Append("[stream interrupted]");
-            turn.Bubble.Text = turn.Buffer.ToString();
+            AppendAssistantText(turn, "[stream interrupted]", decorate: false);
           }
           _assistantTurns.Remove(evt.Id);
         }
@@ -2764,6 +2907,28 @@ namespace CodexVS22
 
     private TextBlock CreateAssistantBubble()
       => CreateChatBubble("assistant");
+
+    private void AppendAssistantText(AssistantTurn turn, string delta, bool isFinal = false, bool decorate = true)
+    {
+      if (turn == null || string.IsNullOrEmpty(delta))
+        return;
+
+      if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
+        turn.Buffer.AppendLine();
+
+      turn.Buffer.Append(delta);
+      var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
+      turn.Bubble.Text = cleaned;
+
+      if (!decorate)
+        return;
+
+      _assistantChunkCounter++;
+      if (!isFinal && _assistantChunkCounter % 5 == 0)
+      {
+        turn.Bubble.Text += "\n";
+      }
+    }
 
     private TextBlock CreateChatBubble(string role, string initialText = "")
     {

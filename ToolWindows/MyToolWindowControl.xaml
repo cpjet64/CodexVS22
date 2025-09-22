@@ -21,42 +21,81 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <DockPanel Grid.Row="0" Margin="6">
-            <TextBlock Text="Codex"
-                       FontWeight="Bold"
-                       Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-            <Button Content="Clear" DockPanel.Dock="Right" Click="OnClearClick" />
-        </DockPanel>
+        <StackPanel Grid.Row="0" Margin="6">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Name="LogoutButton"
+                            Content="Logout"
+                            Margin="0,0,6,0"
+                            Width="80"
+                            Visibility="Collapsed"
+                            Click="OnLogoutClick" />
+                    <Button Content="Clear" Width="80" Click="OnClearClick" />
+                </StackPanel>
+                <TextBlock Text="Codex"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+            </DockPanel>
+            <Border Name="AuthBanner"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <Grid VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Name="AuthMessage"
+                               Grid.Column="0"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
+                               Text="Codex login required. Click Login to continue." />
+                    <Button Name="LoginButton"
+                            Grid.Column="1"
+                            Content="Login"
+                            Width="80"
+                            Margin="12,0,0,0"
+                            Click="OnLoginClick" />
+                </Grid>
+            </Border>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <TextBlock Text="Model:"
+                               Margin="0,0,4,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ComboBox Name="ModelCombo"
+                              Width="170"
+                              SelectionChanged="OnModelSelectionChanged"
+                              VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Reasoning:"
+                               Margin="0,0,4,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ComboBox Name="ReasoningCombo"
+                              Width="140"
+                              SelectionChanged="OnReasoningSelectionChanged"
+                              VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
         <Grid Grid.Row="1" Margin="6">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Background="Transparent">
-                <StackPanel Name="Transcript">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Background="Transparent">
+                <StackPanel Name="Transcript"
+                            HorizontalAlignment="Stretch">
                     <TextBlock Text="Welcome to Codex for Visual Studio"
                                Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
                 </StackPanel>
             </ScrollViewer>
-            <Border Grid.Row="1"
-                    Margin="0,8,0,0"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                    Visibility="Collapsed"
-                    Name="ExecContainer">
-                <DockPanel>
-                    <TextBlock Text="Exec Console" FontWeight="Bold" Margin="4" />
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" Height="160">
-                        <TextBox Name="ExecConsole"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 AcceptsReturn="True"
-                                 Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                                 Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"/>
-                    </ScrollViewer>
-                </DockPanel>
-            </Border>
         </Grid>
         <Grid Grid.Row="2" Margin="6">
             <Grid.RowDefinitions>
@@ -105,6 +144,7 @@
                          AcceptsReturn="True"
                          MinHeight="60"
                          TextWrapping="Wrap"
+                         PreviewKeyDown="OnInputPreviewKeyDown"
                          Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
                          Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
                          BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}" />
