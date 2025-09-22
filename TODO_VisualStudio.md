@@ -67,6 +67,7 @@ Execution Order
 - [x] [T4.5] Disable Send while a turn is active; re-enable on TaskComplete.
 - [ ] [T4.6] Add Clear Chat with confirmation dialog to avoid accidental loss.
 - [ ] [T4.7] Add Copy to Clipboard per message and Copy All in transcript.
+- [x] [T4.7] Add Copy to Clipboard per message and Copy All in transcript.
 - [ ] [T4.8] Add accessibility labels and keyboard navigation for controls.
 - [ ] [T4.9] Show a small spinner or status text while streaming.
 - [ ] [T4.10] Persist window state and last size across sessions.

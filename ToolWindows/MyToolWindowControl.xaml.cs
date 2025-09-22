@@ -1040,9 +1040,89 @@ namespace CodexVS22
         _execIdRemap.Clear();
         _lastExecFallbackId = null;
         _lastUserInput = string.Empty;
+        _assistantChunkCounter = 0;
         ClearTokenUsage();
         HideStreamErrorBanner();
       }
+    }
+
+    private async void OnCopyAllClick(object sender, RoutedEventArgs e)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var text = CollectTranscriptText();
+        if (string.IsNullOrWhiteSpace(text))
+          return;
+        Clipboard.SetText(text);
+        await VS.StatusBar.ShowMessageAsync("Transcript copied to clipboard.");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Copy all failed: {ex.Message}");
+      }
+    }
+
+    private string CollectTranscriptText()
+    {
+      if (this.FindName("Transcript") is not StackPanel transcript)
+        return string.Empty;
+
+      var builder = new StringBuilder();
+      foreach (var child in transcript.Children)
+      {
+        if (child is FrameworkElement element)
+        {
+          var text = ExtractTextFromElement(element);
+          if (string.IsNullOrWhiteSpace(text))
+            continue;
+          if (builder.Length > 0)
+            builder.AppendLine().AppendLine();
+          builder.Append(text.TrimEnd());
+        }
+      }
+
+      return builder.ToString();
+    }
+
+    private static string ExtractTextFromElement(FrameworkElement element)
+    {
+      switch (element)
+      {
+        case null:
+          return string.Empty;
+        case TextBlock tb:
+          return tb.Text ?? string.Empty;
+        case Border border:
+          return ExtractTextFromElement(border.Child as FrameworkElement);
+        case StackPanel panel:
+          return ExtractTextFromPanel(panel);
+        default:
+          return string.Empty;
+      }
+    }
+
+    private static string ExtractTextFromPanel(StackPanel panel)
+    {
+      if (panel == null)
+        return string.Empty;
+
+      var builder = new StringBuilder();
+      foreach (var child in panel.Children)
+      {
+        if (child is FrameworkElement element)
+        {
+          var text = ExtractTextFromElement(element);
+          if (string.IsNullOrWhiteSpace(text))
+            continue;
+          if (builder.Length > 0)
+            builder.AppendLine();
+          builder.Append(text.TrimEnd());
+        }
+      }
+
+      return builder.ToString();
     }
 
     private async Task<string> DetermineInitialWorkingDirectoryAsync()
@@ -2901,6 +2981,7 @@ namespace CodexVS22
 
       var bubble = CreateAssistantBubble();
       turn = new AssistantTurn(bubble);
+      AttachCopyContextMenu(bubble);
       _assistantTurns[id] = turn;
       return turn;
     }
@@ -2909,24 +2990,61 @@ namespace CodexVS22
       => CreateChatBubble("assistant");
 
     private void AppendAssistantText(AssistantTurn turn, string delta, bool isFinal = false, bool decorate = true)
-    {
-      if (turn == null || string.IsNullOrEmpty(delta))
-        return;
-
-      if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
-        turn.Buffer.AppendLine();
-
-      turn.Buffer.Append(delta);
-      var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
-      turn.Bubble.Text = cleaned;
-
-      if (!decorate)
-        return;
-
-      _assistantChunkCounter++;
-      if (!isFinal && _assistantChunkCounter % 5 == 0)
       {
-        turn.Bubble.Text += "\n";
+        if (turn == null || string.IsNullOrEmpty(delta))
+          return;
+
+        if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
+          turn.Buffer.AppendLine();
+
+        turn.Buffer.Append(delta);
+        var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
+        turn.Bubble.Text = cleaned;
+
+        if (!decorate)
+          return;
+
+        _assistantChunkCounter++;
+        if (!isFinal && _assistantChunkCounter % 5 == 0)
+        {
+          turn.Bubble.Text += "\n";
+        }
+      }
+
+    private void AttachCopyContextMenu(TextBlock bubble)
+    {
+      if (bubble == null)
+        return;
+
+      var menu = new ContextMenu();
+      var item = new MenuItem
+      {
+        Header = "Copy Message",
+        Tag = bubble
+      };
+      item.Click += OnCopyMessageMenuItemClick;
+      menu.Items.Add(item);
+      bubble.ContextMenu = menu;
+    }
+
+    private async void OnCopyMessageMenuItemClick(object sender, RoutedEventArgs e)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        if (sender is MenuItem item && item.Tag is TextBlock bubble)
+        {
+          var text = bubble.Text ?? string.Empty;
+          if (string.IsNullOrWhiteSpace(text))
+            return;
+          Clipboard.SetText(text);
+          await VS.StatusBar.ShowMessageAsync("Message copied to clipboard.");
+        }
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Copy message failed: {ex.Message}");
       }
     }
 
@@ -2967,6 +3085,7 @@ namespace CodexVS22
         Visibility = Visibility.Visible
       };
       bubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+      AttachCopyContextMenu(bubble);
 
       container.Child = bubble;
       transcript.Children.Add(container);
@@ -3015,6 +3134,7 @@ namespace CodexVS22
         Visibility = Visibility.Visible
       };
       bodyBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+      AttachCopyContextMenu(bodyBlock);
 
       panel.Children.Add(bodyBlock);
       container.Child = panel;

@@ -30,6 +30,7 @@
                             Width="80"
                             Visibility="Collapsed"
                             Click="OnLogoutClick" />
+                    <Button Content="Copy All" Width="90" Margin="0,0,6,0" Click="OnCopyAllClick" />
                     <Button Content="Clear" Width="80" Click="OnClearClick" />
                 </StackPanel>
                 <TextBlock Text="Codex"
