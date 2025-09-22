@@ -406,6 +406,7 @@ namespace CodexVS22
       var auth = await _host.CheckAuthenticationAsync(_options, _workingDir);
       await HandleAuthenticationResultAsync(auth);
       FocusInputBox();
+      UpdateTelemetryUi();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -662,6 +663,7 @@ namespace CodexVS22
     }
 
     private int _assistantChunkCounter;
+    private readonly TelemetryTracker _telemetry = new();
 
     private async void HandleAgentMessageDelta(EventMsg evt)
     {
@@ -726,6 +728,8 @@ namespace CodexVS22
         if (total == null && input == null && output == null)
           return;
         UpdateTokenUsage(total, input, output);
+        _telemetry.RecordTokens(total, input, output);
+        UpdateTelemetryUi();
       }
       catch (Exception ex)
       {
@@ -757,6 +761,8 @@ namespace CodexVS22
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = "Stream error";
         await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
+        _telemetry.CancelTurn();
+        UpdateTelemetryUi();
         UpdateStreamingIndicator(false);
       }
       catch (Exception ex)
@@ -979,6 +985,8 @@ namespace CodexVS22
         if (status != null) status.Text = string.Empty;
         HideStreamErrorBanner();
         UpdateStreamingIndicator(false);
+        _telemetry.CompleteTurn();
+        UpdateTelemetryUi();
       }
       catch (Exception ex)
       {
@@ -1050,10 +1058,12 @@ namespace CodexVS22
         _lastExecFallbackId = null;
         _lastUserInput = string.Empty;
         _assistantChunkCounter = 0;
+        _telemetry.Reset();
         ClearTokenUsage();
         HideStreamErrorBanner();
         UpdateStreamingIndicator(false);
         FocusInputBox();
+        UpdateTelemetryUi();
       }
     }
 
@@ -1169,6 +1179,73 @@ namespace CodexVS22
       };
 
       baseBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+    }
+
+    private sealed class TelemetryTracker
+    {
+      private int _turns;
+      private int _totalTokens;
+      private double _totalSeconds;
+      private int _currentTokens;
+      private DateTime? _turnStart;
+
+      public void BeginTurn()
+      {
+        _turnStart = DateTime.UtcNow;
+        _currentTokens = 0;
+      }
+
+      public void RecordTokens(int? total, int? input, int? output)
+      {
+        if (!_turnStart.HasValue)
+          return;
+
+        var candidate = 0;
+        if (total.HasValue) candidate = Math.Max(candidate, total.Value);
+        if (output.HasValue) candidate = Math.Max(candidate, output.Value);
+        if (input.HasValue) candidate = Math.Max(candidate, input.Value);
+
+        if (candidate > _currentTokens)
+          _currentTokens = candidate;
+      }
+
+      public void CompleteTurn()
+      {
+        if (!_turnStart.HasValue)
+          return;
+
+        var elapsed = Math.Max(0.05, (DateTime.UtcNow - _turnStart.Value).TotalSeconds);
+        _turns++;
+        _totalTokens += _currentTokens;
+        _totalSeconds += elapsed;
+        _turnStart = null;
+        _currentTokens = 0;
+      }
+
+      public void CancelTurn()
+      {
+        _turnStart = null;
+        _currentTokens = 0;
+      }
+
+      public void Reset()
+      {
+        _turns = 0;
+        _totalTokens = 0;
+        _totalSeconds = 0;
+        _currentTokens = 0;
+        _turnStart = null;
+      }
+
+      public string GetSummary()
+      {
+        if (_turns == 0)
+          return string.Empty;
+
+        var avgTokens = (double)_totalTokens / _turns;
+        var rate = _totalSeconds > 0 ? _totalTokens / _totalSeconds : 0;
+        return $"Turns {_turns} • Avg {avgTokens:F1} tok • {rate:F1} tok/s";
+      }
     }
 
     private void ApplyWindowPreferences()
@@ -3523,6 +3600,24 @@ namespace CodexVS22
       block.Visibility = Visibility.Collapsed;
     }
 
+    private void UpdateTelemetryUi()
+    {
+      if (this.FindName("TelemetryText") is not TextBlock block)
+        return;
+
+      var summary = _telemetry.GetSummary();
+      if (string.IsNullOrEmpty(summary))
+      {
+        block.Text = string.Empty;
+        block.Visibility = Visibility.Collapsed;
+      }
+      else
+      {
+        block.Text = summary;
+        block.Visibility = Visibility.Visible;
+      }
+    }
+
     private void ShowStreamErrorBanner(string message, bool canRetry)
     {
       if (this.FindName("StreamErrorText") is TextBlock text)
@@ -3615,6 +3710,8 @@ namespace CodexVS22
       {
         if (btn != null) btn.IsEnabled = true;
         if (status != null) status.Text = "Send failed";
+        _telemetry.CancelTurn();
+        UpdateTelemetryUi();
         UpdateStreamingIndicator(false);
         return;
       }
@@ -3622,6 +3719,8 @@ namespace CodexVS22
       if (btn != null) btn.IsEnabled = false;
       if (status != null) status.Text = "Streaming...";
       UpdateStreamingIndicator(true);
+      _telemetry.BeginTurn();
+      UpdateTelemetryUi();
       if (!fromRetry)
         _lastUserInput = payloadText;
 
