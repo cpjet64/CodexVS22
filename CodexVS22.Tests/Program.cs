@@ -14,6 +14,7 @@ internal static class Program
   {
     RunTest(nameof(AgentMessageEvents_CorrelateDeltaAndFinal), AgentMessageEvents_CorrelateDeltaAndFinal);
     RunTest(nameof(ParallelTurns_CorrelateIndependently), ParallelTurns_CorrelateIndependently);
+    RunTest(nameof(ParallelTurns_TaskCompleteCleansState), ParallelTurns_TaskCompleteCleansState);
 
     if (Failures.Count == 0)
     {
@@ -73,6 +74,26 @@ internal static class Program
     AssertFalse(tracker.HasTranscript("turn-A"), "turn-A should not have a final transcript");
     AssertFalse(tracker.HasInFlight("turn-A"), "turn-A should be cleared");
     AssertFalse(tracker.HasInFlight("turn-B"), "turn-B should be cleared");
+  }
+
+  private static void ParallelTurns_TaskCompleteCleansState()
+  {
+    var lines = new[]
+    {
+      "{\"msg\":{\"kind\":\"AgentMessageDelta\",\"id\":\"turn-1\",\"text_delta\":\"foo\"}}",
+      "{\"msg\":{\"kind\":\"AgentMessageDelta\",\"id\":\"turn-2\",\"text_delta\":\"bar\"}}",
+      "{\"msg\":{\"kind\":\"TaskComplete\",\"id\":\"turn-1\"}}",
+      "{\"msg\":{\"kind\":\"AgentMessage\",\"id\":\"turn-2\",\"text\":\"bar!\"}}",
+      "{\"msg\":{\"kind\":\"TaskComplete\",\"id\":\"turn-2\"}}"
+    };
+
+    var tracker = new TranscriptTracker();
+    tracker.Process(lines);
+
+    AssertFalse(tracker.HasTranscript("turn-1"), "turn-1 transcript should be cleared");
+    AssertFalse(tracker.HasInFlight("turn-1"), "turn-1 in-flight state should be cleared");
+    AssertEqual("bar!", tracker.GetTranscript("turn-2"), "turn-2 transcript mismatch");
+    AssertFalse(tracker.HasInFlight("turn-2"), "turn-2 in-flight state should be cleared");
   }
 
   private static void AssertEqual(string expected, string actual, string message)

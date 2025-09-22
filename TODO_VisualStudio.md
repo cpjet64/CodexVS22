@@ -56,7 +56,7 @@ Execution Order
 - [x] [T3.9] Add compact/no-op submission for heartbeat if CLI supports it.
 - [x] [T3.10] Unit-test correlation with canned event streams.
 - [x] [T3.11] Persist last rollout_path observed for diagnostics.
-- [ ] [T3.12] Post-test with parallel turns and ensure correct routing.
+- [x] [T3.12] Post-test with parallel turns and ensure correct routing.
 
 ## T4. Tool Window chat UI
 - [x] [T4.1] Create WPF Tool Window layout with header, transcript, and input box.
