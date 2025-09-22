@@ -706,7 +706,7 @@ namespace CodexVS22
         }
         else
         {
-          turn.Bubble.Text = NormalizeAssistantText(turn.Buffer.ToString());
+          turn.Bubble.Text = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
         }
 
         _assistantTurns.Remove(id);
@@ -3236,7 +3236,7 @@ namespace CodexVS22
           turn.Buffer.AppendLine();
 
         turn.Buffer.Append(delta);
-        var cleaned = NormalizeAssistantText(turn.Buffer.ToString());
+        var cleaned = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
         turn.Bubble.Text = cleaned;
 
         if (!decorate)
@@ -3463,28 +3463,28 @@ namespace CodexVS22
     {
       var direct = TryGetString(evt.Raw, "text_delta");
       if (!string.IsNullOrEmpty(direct))
-        return StripAnsi(direct);
+        return ChatTextUtilities.StripAnsi(direct);
 
       var text = CollectText(evt.Raw?["delta"] ?? evt.Raw?["message"]);
       if (!string.IsNullOrEmpty(text))
-        return StripAnsi(text);
+        return ChatTextUtilities.StripAnsi(text);
 
       text = CollectText(evt.Raw);
-      return StripAnsi(text);
+      return ChatTextUtilities.StripAnsi(text);
     }
 
     private static string ExtractFinalText(EventMsg evt)
     {
       var direct = TryGetString(evt.Raw, "text");
       if (!string.IsNullOrEmpty(direct))
-        return StripAnsi(direct);
+        return ChatTextUtilities.StripAnsi(direct);
 
       var text = CollectText(evt.Raw?["message"]);
       if (!string.IsNullOrEmpty(text))
-        return StripAnsi(text);
+        return ChatTextUtilities.StripAnsi(text);
 
       text = CollectText(evt.Raw);
-      return StripAnsi(text);
+      return ChatTextUtilities.StripAnsi(text);
     }
 
     private static string ExtractStreamErrorMessage(EventMsg evt)
@@ -3700,7 +3700,7 @@ namespace CodexVS22
       var btn = this.FindName("SendButton") as Button;
       var status = this.FindName("StatusText") as TextBlock;
 
-      var json = CreateUserInputSubmission(payloadText);
+      var json = ChatTextUtilities.CreateUserInputSubmission(payloadText);
       var pane = await DiagnosticsPane.GetAsync();
       await pane.WriteLineAsync($"[debug] submission {json}");
 
@@ -3882,16 +3882,7 @@ namespace CodexVS22
       return string.Empty;
     }
 
-    private static readonly Regex AnsiRegex = new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
     private static readonly Regex Base64Regex = new(@"^[A-Za-z0-9+/=\r\n]+$", RegexOptions.Compiled);
-
-    private static string StripAnsi(string value)
-    {
-      if (string.IsNullOrEmpty(value))
-        return string.Empty;
-
-      return AnsiRegex.Replace(value, string.Empty);
-    }
 
     private static string NormalizeExecChunk(string value)
     {
@@ -3933,78 +3924,5 @@ namespace CodexVS22
       }
     }
 
-    private static string NormalizeAssistantText(string value)
-    {
-      if (string.IsNullOrEmpty(value))
-        return string.Empty;
-
-      var stripped = StripAnsi(value);
-      var normalized = stripped.Normalize(NormalizationForm.FormKC);
-      normalized = FixMojibake(normalized);
-
-      var builder = new StringBuilder(normalized.Length);
-      var enumerator = StringInfo.GetTextElementEnumerator(normalized);
-      while (enumerator.MoveNext())
-      {
-        var element = enumerator.GetTextElement();
-        if (element.Length == 1)
-        {
-          var ch = element[0];
-          builder.Append(ch switch
-          {
-            '\u2018' or '\u2019' or '\u2032' => '\'',
-            '\u201C' or '\u201D' or '\u2033' => '"',
-            '\u2013' or '\u2014' => '-',
-            '\u2026' => "...",
-            '\u00A0' or '\u2007' or '\u205F' => ' ',
-            '\uFEFF' => ' ',
-            _ => ch
-          });
-        }
-        else
-        {
-          builder.Append(element switch
-          {
-            "\u200D" => string.Empty,
-            _ => element
-          });
-        }
-      }
-
-      return builder.ToString();
-    }
-
-    private static string FixMojibake(string value)
-    {
-      if (string.IsNullOrEmpty(value))
-        return string.Empty;
-
-      if (value.IndexOf('Ã') >= 0 || value.IndexOf('â') >= 0 || value.IndexOf('Ê') >= 0 || value.IndexOf('\uFFFD') >= 0)
-      {
-        try
-        {
-          var bytes = Encoding.GetEncoding(1252).GetBytes(value);
-          var recoded = Encoding.UTF8.GetString(bytes);
-          if (!string.IsNullOrEmpty(recoded))
-            value = recoded;
-        }
-        catch
-        {
-          // Ignore and fall through to replacements.
-        }
-      }
-
-      return value
-        .Replace("â€™", "'")
-        .Replace("â€˜", "'")
-        .Replace("â€œ", "\"")
-        .Replace("â€�", "\"")
-        .Replace("â€“", "-")
-        .Replace("â€”", "-")
-        .Replace("â€¦", "...")
-        .Replace("Â", "")
-        .Replace("\uFFFDTM", "'")
-        .Replace("\uFFFDtm", "'");
-    }
   }
 }

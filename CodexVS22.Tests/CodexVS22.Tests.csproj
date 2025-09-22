@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Core\Protocol\Events.cs" Link="Protocol\Events.cs" />
+    <Compile Include="..\Core\ChatTextUtilities.cs" Link="Core\ChatTextUtilities.cs" />
   </ItemGroup>
 </Project>

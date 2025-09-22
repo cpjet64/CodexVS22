@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
 using Newtonsoft.Json.Linq;
 
@@ -15,6 +16,10 @@ internal static class Program
     RunTest(nameof(AgentMessageEvents_CorrelateDeltaAndFinal), AgentMessageEvents_CorrelateDeltaAndFinal);
     RunTest(nameof(ParallelTurns_CorrelateIndependently), ParallelTurns_CorrelateIndependently);
     RunTest(nameof(ParallelTurns_TaskCompleteCleansState), ParallelTurns_TaskCompleteCleansState);
+    RunTest(nameof(UserInputSubmission_LongInput_RoundTrips), UserInputSubmission_LongInput_RoundTrips);
+    RunTest(nameof(UserInputSubmission_NonAscii_RoundTrips), UserInputSubmission_NonAscii_RoundTrips);
+    RunTest(nameof(UserInputSubmission_PasteFlowPreservesLines), UserInputSubmission_PasteFlowPreservesLines);
+    RunTest(nameof(NormalizeAssistantText_NormalizesSmartQuotes), NormalizeAssistantText_NormalizesSmartQuotes);
 
     if (Failures.Count == 0)
     {
@@ -96,6 +101,34 @@ internal static class Program
     AssertFalse(tracker.HasInFlight("turn-2"), "turn-2 in-flight state should be cleared");
   }
 
+  private static void UserInputSubmission_LongInput_RoundTrips()
+  {
+    var sample = new string('A', 4096);
+    var payload = ExtractSubmissionText(sample);
+    AssertEqual(sample, payload, "Long input should round-trip through submission");
+  }
+
+  private static void UserInputSubmission_NonAscii_RoundTrips()
+  {
+    const string sample = "café 🤖 中国";
+    var payload = ExtractSubmissionText(sample);
+    AssertEqual(sample, payload, "Non-ASCII input should be preserved");
+  }
+
+  private static void UserInputSubmission_PasteFlowPreservesLines()
+  {
+    const string sample = "line1\r\nline2\r\nline3";
+    var payload = ExtractSubmissionText(sample);
+    AssertEqual(sample, payload, "Paste flow should retain CRLF line breaks");
+  }
+
+  private static void NormalizeAssistantText_NormalizesSmartQuotes()
+  {
+    const string sample = "“Smart” — test… café";
+    var normalized = ChatTextUtilities.NormalizeAssistantText(sample);
+    AssertEqual("\"Smart\" - test... café", normalized, "Assistant text should normalize typographic characters");
+  }
+
   private static void AssertEqual(string expected, string actual, string message)
   {
     if (!string.Equals(expected, actual, StringComparison.Ordinal))
@@ -106,6 +139,13 @@ internal static class Program
   {
     if (condition)
       throw new InvalidOperationException(message);
+  }
+
+  private static string ExtractSubmissionText(string input)
+  {
+    var payload = ChatTextUtilities.CreateUserInputSubmission(input);
+    var obj = JObject.Parse(payload);
+    return obj["op"]?["items"]?[0]?["text"]?.ToString() ?? string.Empty;
   }
 
   private sealed class TranscriptTracker

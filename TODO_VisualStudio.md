@@ -76,7 +76,7 @@ Execution Order
 - [x] [T4.10] Persist window state and last size across sessions.
 - [ ] [T4.11] Telemetry: count chats, average tokens/sec, average turn time.
 - [x] [T4.11] Telemetry: count chats, average tokens/sec, average turn time.
-- [ ] [T4.12] Post-test: long inputs, non-ASCII, and paste flows behave correctly.
+- [x] [T4.12] Post-test: long inputs, non-ASCII, and paste flows behave correctly.
 
 ## T5. Approvals (exec and patch) UX
 - [x] [T5.1] Add approval policy toggle: Chat, Agent, Agent (Full Access).

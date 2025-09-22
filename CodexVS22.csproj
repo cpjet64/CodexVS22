@@ -54,6 +54,8 @@
     <Compile Include="Commands\DiagnosticsCommand.cs" />
     <Compile Include="Core\CodexCliHost.cs" />
     <Compile Include="Core\Protocol\Events.cs" />
+    <Compile Include="Core\ChatTextUtilities.cs" />
+    <Compile Include="Core\DiagnosticsPane.cs" />
     <Compile Include="CodexVS22Package.cs" />
     <Compile Include="source.extension.cs">
       <AutoGen>True</AutoGen>
@@ -78,7 +80,7 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <VSCTCompile Include="VSCommandTable.vsct">
+    <VSCTCompile Include="VSCommandTable.vsct" Condition="'$(OS)' == 'Windows_NT'">
       <ResourceName>Menus.ctmenu</ResourceName>
       <Generator>VsctGenerator</Generator>
       <LastGenOutput>VSCommandTable.cs</LastGenOutput>
@@ -104,17 +106,58 @@
     <Reference Include="System.ComponentModel.Composition" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Community.VisualStudio.Toolkit">
+      <HintPath>$(NuGetPackageRoot)community.visualstudio.toolkit.17/17.0.507/lib/net48/Community.VisualStudio.Toolkit.dll</HintPath>
+    </Reference>
+    <Reference Include="EnvDTE">
+      <HintPath>$(NuGetPackageRoot)envdte/17.10.40170/lib/net472/envdte.dll</HintPath>
+    </Reference>
+    <Reference Include="EnvDTE80">
+      <HintPath>$(NuGetPackageRoot)envdte80/17.10.40170/lib/net472/envdte80.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.15.0">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.shell.15.0/17.10.40170/lib/net472/Microsoft.VisualStudio.Shell.15.0.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.Framework">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.shell.framework/17.10.40170/lib/net472/Microsoft.VisualStudio.Shell.Framework.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Threading">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.threading/17.10.41/lib/net472/Microsoft.VisualStudio.Threading.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Imaging">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.imaging/17.10.40170/lib/net472/Microsoft.VisualStudio.Imaging.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.imaging.interop.14.0.designtime/17.10.40152/lib/net472/Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Interop">
+      <HintPath>$(NuGetPackageRoot)microsoft.visualstudio.interop/17.10.40170/lib/net472/Microsoft.VisualStudio.Interop.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Workspace.VSIntegration.Contracts">
+      <HintPath>$(VisualStudioInstallDir)Common7\IDE\CommonExtensions\Microsoft\OpenFolder\Microsoft.VisualStudio.Workspace.VSIntegration.Contracts.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(NuGetPackageRoot)newtonsoft.json/13.0.3/lib/net45/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Community.VisualStudio.VSCT" Version="16.0.29.6" PrivateAssets="all" />
     <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.507" ExcludeAssets="Runtime" />
     <!-- Remove meta SDK to avoid heavy transitive deps that conflict in VS 17.x -->
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.9.3168" />
-    <PackageReference Include="System.Text.Json" Version="5.0.2" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.10.40171" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Options\CodexOptions.cs" />
+    <Compile Include="Options\CodexOptions.cs">
+      <SubType>Component</SubType>
+    </Compile>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != '' and Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+  <Import Project="$(VSToolsPath)\vssdk\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != '' and !Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets') and Exists('$(VSToolsPath)\vssdk\Microsoft.VsSDK.targets')" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
