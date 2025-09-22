@@ -33,7 +33,8 @@
                             Click="OnLogoutClick">
                         <AccessText Text="Lo_gout" />
                     </Button>
-                    <Button Width="90"
+                    <Button Name="CopyAllButton"
+                            Width="90"
                             Margin="0,0,6,0"
                             KeyboardNavigation.TabIndex="5"
                             AutomationProperties.Name="Copy entire transcript"

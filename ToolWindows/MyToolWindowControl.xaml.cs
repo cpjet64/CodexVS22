@@ -1046,7 +1046,7 @@ namespace CodexVS22
       ClearTokenUsage();
       HideStreamErrorBanner();
       FocusInputBox();
-    }
+      }
     }
 
     private async void OnCopyAllClick(object sender, RoutedEventArgs e)
@@ -1059,6 +1059,14 @@ namespace CodexVS22
           return;
         Clipboard.SetText(text);
         await VS.StatusBar.ShowMessageAsync("Transcript copied to clipboard.");
+        if (sender is Button button)
+        {
+          var shimmer = new DoubleAnimation(0.6, 0, TimeSpan.FromMilliseconds(400))
+          {
+            AutoReverse = false
+          };
+          button.BeginAnimation(Button.OpacityProperty, shimmer);
+        }
       }
       catch (Exception ex)
       {
@@ -3054,6 +3062,8 @@ namespace CodexVS22
             return;
           Clipboard.SetText(text);
           await VS.StatusBar.ShowMessageAsync("Message copied to clipboard.");
+          bubble.Background = new SolidColorBrush(Color.FromArgb(40, 0, 120, 215));
+          bubble.Dispatcher.BeginInvoke(new Action(() => bubble.Background = Brushes.Transparent), DispatcherPriority.Background);
         }
       }
       catch (Exception ex)
