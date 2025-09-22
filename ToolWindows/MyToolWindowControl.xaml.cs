@@ -42,6 +42,8 @@ namespace CodexVS22
     private readonly Dictionary<string, ExecTurn> _execTurns = new();
     private readonly Dictionary<string, string> _execCommandIndex = new();
     private readonly Dictionary<string, string> _execIdRemap = new();
+    private readonly Dictionary<string, bool> _rememberedExecApprovals = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _rememberedPatchApprovals = new(StringComparer.Ordinal);
     private string _lastUserInput;
     private CodexOptions _options;
     private string _workingDir;
@@ -448,6 +450,8 @@ namespace CodexVS22
     private async Task<bool> RestartCliAsync()
     {
       DisposeHost();
+      _rememberedExecApprovals.Clear();
+      _rememberedPatchApprovals.Clear();
       _host = CreateHost();
       var options = _options ?? new CodexOptions();
       var dir = _workingDir ?? string.Empty;
@@ -777,15 +781,38 @@ namespace CodexVS22
       try
       {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var result = System.Windows.MessageBox.Show("Apply patch from Codex?", "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        var approved = result == MessageBoxResult.Yes;
-        var callId = TryGetString(evt.Raw, "call_id") ?? evt.Id;
-        var submission = CreatePatchApprovalSubmission(callId, approved);
         var host = _host;
-        if (host != null)
+        if (host == null)
+          return;
+
+        var raw = evt.Raw ?? new JObject();
+        var signature = BuildPatchSignature(raw);
+        var callId = TryGetString(raw, "call_id") ?? evt.Id ?? string.Empty;
+        if (string.IsNullOrEmpty(callId))
+          return;
+
+        var options = _options ?? new CodexOptions();
+        if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
-          await host.SendAsync(submission);
+          await host.SendAsync(CreatePatchApprovalSubmission(callId, autoApproved));
+          await LogAutoApprovalAsync("patch", signature, autoApproved, autoReason);
+          await VS.StatusBar.ShowMessageAsync($"Codex patch {(autoApproved ? "approved" : "denied")} ({autoReason}).");
+          return;
         }
+
+        var summary = TryGetString(raw, "summary") ?? "Apply patch from Codex?";
+        var result = System.Windows.MessageBox.Show(summary, "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        var approved = result == MessageBoxResult.Yes;
+
+        if (!string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature))
+        {
+          var rememberPrompt = $"Remember this decision for patch '{signature}' during this session?";
+          var rememberResult = System.Windows.MessageBox.Show(rememberPrompt, "Remember approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+          if (rememberResult == MessageBoxResult.Yes)
+            RememberPatchDecision(signature, approved);
+        }
+
+        await host.SendAsync(CreatePatchApprovalSubmission(callId, approved));
       }
       catch (Exception ex)
       {
@@ -799,20 +826,50 @@ namespace CodexVS22
       try
       {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var host = _host;
+        if (host == null)
+          return;
+
         var pane = await DiagnosticsPane.GetAsync();
         if (evt.Raw != null)
           await pane.WriteLineAsync($"[info] Exec approval request: {evt.Raw.ToString(Formatting.None)}");
-        var cmd = TryGetString(evt.Raw, "command") ?? "(unknown)";
-        var cwd = TryGetString(evt.Raw, "cwd") ?? string.Empty;
-        var result = System.Windows.MessageBox.Show($"Approve exec?\n{cmd}\nCWD: {cwd}", "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        var approved = result == MessageBoxResult.Yes;
-        var callId = TryGetString(evt.Raw, "call_id") ?? evt.Id;
-        var submission = CreateExecApprovalSubmission(callId, approved);
-        var host = _host;
-        if (host != null)
+
+        var raw = evt.Raw ?? new JObject();
+        var (displayCommand, normalizedCommand) = ExtractExecCommandInfo(raw["command"]);
+        var signature = string.IsNullOrEmpty(normalizedCommand) ? displayCommand : normalizedCommand;
+        var callId = TryGetString(raw, "call_id") ?? evt.Id ?? string.Empty;
+        if (string.IsNullOrEmpty(callId))
+          return;
+
+        var cwd = TryGetString(raw, "cwd") ?? string.Empty;
+        var options = _options ?? new CodexOptions();
+
+        if (TryResolveExecApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
-          await host.SendAsync(submission);
+          await host.SendAsync(CreateExecApprovalSubmission(callId, autoApproved));
+          await LogAutoApprovalAsync("exec", signature, autoApproved, autoReason);
+          await VS.StatusBar.ShowMessageAsync($"Codex exec {(autoApproved ? "approved" : "denied")} ({autoReason}).");
+          return;
         }
+
+        var commandForPrompt = string.IsNullOrEmpty(displayCommand) ? (TryGetString(raw, "command") ?? "(unknown)") : displayCommand;
+        var prompt = string.IsNullOrWhiteSpace(cwd)
+          ? $"Approve exec?\n{commandForPrompt}"
+          : $"Approve exec?\n{commandForPrompt}\nCWD: {cwd}";
+
+        var result = System.Windows.MessageBox.Show(prompt, "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        var approved = result == MessageBoxResult.Yes;
+
+        if (!string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature))
+        {
+          var rememberPrompt = $"Remember this decision for '{signature}' during this session?";
+          var rememberResult = System.Windows.MessageBox.Show(rememberPrompt, "Remember approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
+          if (rememberResult == MessageBoxResult.Yes)
+            RememberExecDecision(signature, approved);
+        }
+
+        await host.SendAsync(CreateExecApprovalSubmission(callId, approved));
       }
       catch (Exception ex)
       {
@@ -1055,6 +1112,8 @@ namespace CodexVS22
         _execTurns.Clear();
         _execCommandIndex.Clear();
         _execIdRemap.Clear();
+        _rememberedExecApprovals.Clear();
+        _rememberedPatchApprovals.Clear();
         _lastExecFallbackId = null;
         _lastUserInput = string.Empty;
         _assistantChunkCounter = 0;
@@ -1064,6 +1123,27 @@ namespace CodexVS22
         UpdateStreamingIndicator(false);
         FocusInputBox();
         UpdateTelemetryUi();
+      }
+    }
+
+    private async void OnResetApprovalsClick(object sender, RoutedEventArgs e)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var execCount = _rememberedExecApprovals.Count;
+        var patchCount = _rememberedPatchApprovals.Count;
+        _rememberedExecApprovals.Clear();
+        _rememberedPatchApprovals.Clear();
+
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[info] Reset remembered approvals (exec={execCount}, patch={patchCount}).");
+        await VS.StatusBar.ShowMessageAsync("Codex approvals reset for this session.");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] Reset approvals failed: {ex.Message}");
       }
     }
 
@@ -3155,6 +3235,107 @@ namespace CodexVS22
       }
 
       return trimmed;
+    }
+
+    private static bool ShouldOfferRemember(string signature)
+      => !string.IsNullOrWhiteSpace(signature);
+
+    private void RememberExecDecision(string signature, bool approved)
+    {
+      if (string.IsNullOrWhiteSpace(signature))
+        return;
+      _rememberedExecApprovals[signature] = approved;
+    }
+
+    private void RememberPatchDecision(string signature, bool approved)
+    {
+      if (string.IsNullOrWhiteSpace(signature))
+        return;
+      _rememberedPatchApprovals[signature] = approved;
+    }
+
+    private bool TryResolveExecApproval(CodexOptions.ApprovalMode mode, string signature, out bool approved, out string reason)
+    {
+      approved = false;
+      reason = string.Empty;
+
+      if (mode == CodexOptions.ApprovalMode.Agent || mode == CodexOptions.ApprovalMode.AgentFullAccess)
+      {
+        approved = true;
+        reason = mode == CodexOptions.ApprovalMode.Agent ? "Agent mode" : "Agent full access";
+        if (!string.IsNullOrWhiteSpace(signature))
+          _rememberedExecApprovals[signature] = approved;
+        return true;
+      }
+
+      if (!string.IsNullOrWhiteSpace(signature) && _rememberedExecApprovals.TryGetValue(signature, out approved))
+      {
+        reason = "remembered";
+        return true;
+      }
+
+      return false;
+    }
+
+    private bool TryResolvePatchApproval(CodexOptions.ApprovalMode mode, string signature, out bool approved, out string reason)
+    {
+      approved = false;
+      reason = string.Empty;
+
+      if (mode == CodexOptions.ApprovalMode.AgentFullAccess)
+      {
+        approved = true;
+        reason = "Agent full access";
+        if (!string.IsNullOrWhiteSpace(signature))
+          _rememberedPatchApprovals[signature] = approved;
+        return true;
+      }
+
+      if (!string.IsNullOrWhiteSpace(signature) && _rememberedPatchApprovals.TryGetValue(signature, out approved))
+      {
+        reason = "remembered";
+        return true;
+      }
+
+      return false;
+    }
+
+    private static async Task LogAutoApprovalAsync(string kind, string signature, bool approved, string reason)
+    {
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        var decision = approved ? "approved" : "denied";
+        var signaturePart = string.IsNullOrWhiteSpace(signature) ? string.Empty : $" [{signature}]";
+        var reasonPart = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" via {reason}";
+        await pane.WriteLineAsync($"[info] Auto-{decision} {kind}{signaturePart}{reasonPart}");
+      }
+      catch
+      {
+        // diagnostics best effort
+      }
+    }
+
+    private static string BuildPatchSignature(JObject raw)
+    {
+      if (raw == null)
+        return string.Empty;
+
+      var summary = TryGetString(raw, "summary");
+      if (!string.IsNullOrWhiteSpace(summary))
+        return summary;
+
+      if (raw["files"] is JArray files && files.Count > 0)
+      {
+        var names = files
+          .Select(token => TrimQuotes(token?.ToString() ?? string.Empty))
+          .Where(s => !string.IsNullOrWhiteSpace(s));
+        var joined = string.Join("|", names);
+        if (!string.IsNullOrWhiteSpace(joined))
+          return joined;
+      }
+
+      return TryGetString(raw, "call_id") ?? string.Empty;
     }
 
     private static string NormalizeCwd(string cwd)

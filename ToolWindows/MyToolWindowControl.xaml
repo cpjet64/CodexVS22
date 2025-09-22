@@ -28,7 +28,7 @@
                             Margin="0,0,6,0"
                             Width="80"
                             Visibility="Collapsed"
-                            KeyboardNavigation.TabIndex="6"
+                            KeyboardNavigation.TabIndex="7"
                             AutomationProperties.Name="Log out"
                             Click="OnLogoutClick">
                         <AccessText Text="Lo_gout" />
@@ -36,10 +36,18 @@
                     <Button Name="CopyAllButton"
                             Width="90"
                             Margin="0,0,6,0"
-                            KeyboardNavigation.TabIndex="5"
+                            KeyboardNavigation.TabIndex="6"
                             AutomationProperties.Name="Copy entire transcript"
                             Click="OnCopyAllClick">
                         <AccessText Text="Cop_y All" />
+                    </Button>
+                    <Button Name="ResetApprovalsButton"
+                            Width="120"
+                            Margin="0,0,6,0"
+                            KeyboardNavigation.TabIndex="5"
+                            AutomationProperties.Name="Reset approvals"
+                            Click="OnResetApprovalsClick">
+                        <AccessText Text="Reset _Approvals" />
                     </Button>
                     <Button Width="80"
                             KeyboardNavigation.TabIndex="4"

@@ -84,7 +84,7 @@ Execution Order
 - [x] [T5.3] Send ExecApproval with decision; remember per-session rule if chosen.
 - [x] [T5.4] On ApplyPatchApprovalRequest show file list and summary of changes.
 - [x] [T5.5] Send PatchApproval with decision and optional rationale.
-- [ ] [T5.6] Provide 'Reset approvals' to clear remembered session decisions.
+- [x] [T5.6] Provide 'Reset approvals' to clear remembered session decisions.
 - [ ] [T5.7] Add a warning banner when in Full Access mode.
 - [ ] [T5.8] Log denied approvals with reason code and context.
 - [ ] [T5.9] Make approval prompts non-blocking and focus-safe.
