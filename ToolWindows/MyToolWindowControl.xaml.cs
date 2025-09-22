@@ -44,6 +44,8 @@ namespace CodexVS22
     private readonly Dictionary<string, string> _execIdRemap = new();
     private readonly Dictionary<string, bool> _rememberedExecApprovals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _rememberedPatchApprovals = new(StringComparer.Ordinal);
+    private readonly Queue<ApprovalRequest> _approvalQueue = new();
+    private ApprovalRequest _activeApproval;
     private string _lastUserInput;
     private CodexOptions _options;
     private string _workingDir;
@@ -86,6 +88,30 @@ namespace CodexVS22
 
       public TextBlock Bubble { get; }
       public StringBuilder Buffer { get; } = new StringBuilder();
+    }
+
+    private enum ApprovalKind
+    {
+      Exec,
+      Patch
+    }
+
+    private sealed class ApprovalRequest
+    {
+      public ApprovalRequest(ApprovalKind kind, string callId, string message, string signature, bool canRemember)
+      {
+        Kind = kind;
+        CallId = callId;
+        Message = message;
+        Signature = signature;
+        CanRemember = canRemember;
+      }
+
+      public ApprovalKind Kind { get; }
+      public string CallId { get; }
+      public string Message { get; }
+      public string Signature { get; }
+      public bool CanRemember { get; }
     }
 
     private sealed class ExecTurn
@@ -446,6 +472,7 @@ namespace CodexVS22
       _host.Dispose();
       _host = null;
       _cliStarted = false;
+      ClearApprovalState();
     }
 
     private async Task<bool> RestartCliAsync()
@@ -453,6 +480,7 @@ namespace CodexVS22
       DisposeHost();
       _rememberedExecApprovals.Clear();
       _rememberedPatchApprovals.Clear();
+       ClearApprovalState();
       _host = CreateHost();
       var options = _options ?? new CodexOptions();
       var dir = _workingDir ?? string.Empty;
@@ -803,20 +831,10 @@ namespace CodexVS22
         }
 
         var summary = TryGetString(raw, "summary") ?? "Apply patch from Codex?";
-        var result = System.Windows.MessageBox.Show(summary, "Codex Patch Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        var approved = result == MessageBoxResult.Yes;
-
-        if (!string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature))
-        {
-          var rememberPrompt = $"Remember this decision for patch '{signature}' during this session?";
-          var rememberResult = System.Windows.MessageBox.Show(rememberPrompt, "Remember approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-          if (rememberResult == MessageBoxResult.Yes)
-            RememberPatchDecision(signature, approved);
-        }
-
-        await host.SendAsync(CreatePatchApprovalSubmission(callId, approved));
-        if (!approved)
-          await LogManualApprovalAsync("patch", signature, approved);
+        var canRemember = !string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature);
+        EnqueueApprovalRequest(new ApprovalRequest(ApprovalKind.Patch, callId, summary, signature, canRemember));
+        await VS.StatusBar.ShowMessageAsync("Codex awaiting patch approval.");
+        return;
       }
       catch (Exception ex)
       {
@@ -863,20 +881,10 @@ namespace CodexVS22
           ? $"Approve exec?\n{commandForPrompt}"
           : $"Approve exec?\n{commandForPrompt}\nCWD: {cwd}";
 
-        var result = System.Windows.MessageBox.Show(prompt, "Codex Exec Approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        var approved = result == MessageBoxResult.Yes;
-
-        if (!string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature))
-        {
-          var rememberPrompt = $"Remember this decision for '{signature}' during this session?";
-          var rememberResult = System.Windows.MessageBox.Show(rememberPrompt, "Remember approval", MessageBoxButton.YesNo, MessageBoxImage.Question);
-          if (rememberResult == MessageBoxResult.Yes)
-            RememberExecDecision(signature, approved);
-        }
-
-        await host.SendAsync(CreateExecApprovalSubmission(callId, approved));
-        if (!approved)
-          await LogManualApprovalAsync("exec", signature, approved);
+        var canRemember = !string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature);
+        EnqueueApprovalRequest(new ApprovalRequest(ApprovalKind.Exec, callId, prompt, signature, canRemember));
+        await VS.StatusBar.ShowMessageAsync("Codex awaiting exec approval.");
+        return;
       }
       catch (Exception ex)
       {
@@ -1121,6 +1129,8 @@ namespace CodexVS22
         _execIdRemap.Clear();
         _rememberedExecApprovals.Clear();
         _rememberedPatchApprovals.Clear();
+        ClearApprovalState(hideBanner: false);
+        ShowApprovalBanner(null);
         _lastExecFallbackId = null;
         _lastUserInput = string.Empty;
         _assistantChunkCounter = 0;
@@ -1152,6 +1162,16 @@ namespace CodexVS22
         var pane = await DiagnosticsPane.GetAsync();
         await pane.WriteLineAsync($"[error] Reset approvals failed: {ex.Message}");
       }
+    }
+
+    private void OnApprovalApproveClick(object sender, RoutedEventArgs e)
+    {
+      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(true));
+    }
+
+    private void OnApprovalDenyClick(object sender, RoutedEventArgs e)
+    {
+      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(false));
     }
 
     private async void OnCopyAllClick(object sender, RoutedEventArgs e)
@@ -3259,6 +3279,126 @@ namespace CodexVS22
       if (string.IsNullOrWhiteSpace(signature))
         return;
       _rememberedPatchApprovals[signature] = approved;
+    }
+
+    private void EnqueueApprovalRequest(ApprovalRequest request)
+    {
+      if (request == null)
+        return;
+      _approvalQueue.Enqueue(request);
+      if (_activeApproval == null)
+        ThreadHelper.JoinableTaskFactory.RunAsync(DisplayNextApprovalAsync);
+    }
+
+    private async Task DisplayNextApprovalAsync()
+    {
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+      if (_activeApproval != null)
+        return;
+      if (_approvalQueue.Count == 0)
+      {
+        ShowApprovalBanner(null);
+        return;
+      }
+
+      _activeApproval = _approvalQueue.Dequeue();
+      ShowApprovalBanner(_activeApproval);
+    }
+
+    private void ShowApprovalBanner(ApprovalRequest request)
+    {
+      if (this.FindName("ApprovalPromptBanner") is not Border banner ||
+          this.FindName("ApprovalPromptText") is not TextBlock text ||
+          this.FindName("ApprovalRememberCheckBox") is not CheckBox remember ||
+          this.FindName("ApprovalApproveButton") is not Button approve ||
+          this.FindName("ApprovalDenyButton") is not Button deny)
+      {
+        return;
+      }
+
+      if (request == null)
+      {
+        banner.Visibility = Visibility.Collapsed;
+        remember.Visibility = Visibility.Collapsed;
+        remember.IsChecked = false;
+        approve.IsEnabled = false;
+        deny.IsEnabled = false;
+        return;
+      }
+
+      banner.Visibility = Visibility.Visible;
+      text.Text = request.Message;
+      remember.Visibility = request.CanRemember ? Visibility.Visible : Visibility.Collapsed;
+      remember.IsChecked = false;
+      approve.IsEnabled = true;
+      deny.IsEnabled = true;
+    }
+
+    private async Task ResolveActiveApprovalAsync(bool approved)
+    {
+      ApprovalRequest request;
+      bool rememberChecked = false;
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+      request = _activeApproval;
+      if (request == null)
+        return;
+
+      if (this.FindName("ApprovalRememberCheckBox") is CheckBox rememberCheck)
+        rememberChecked = request.CanRemember && rememberCheck.IsChecked == true;
+
+      _activeApproval = null;
+      ShowApprovalBanner(null);
+
+      if (rememberChecked)
+      {
+        if (request.Kind == ApprovalKind.Exec)
+          RememberExecDecision(request.Signature, approved);
+        else
+          RememberPatchDecision(request.Signature, approved);
+      }
+
+      var host = _host;
+      if (host != null)
+      {
+        if (request.Kind == ApprovalKind.Exec)
+        {
+          await host.SendAsync(CreateExecApprovalSubmission(request.CallId, approved));
+          if (!approved)
+            await LogManualApprovalAsync("exec", request.Signature, approved);
+        }
+        else
+        {
+          await host.SendAsync(CreatePatchApprovalSubmission(request.CallId, approved));
+          if (!approved)
+            await LogManualApprovalAsync("patch", request.Signature, approved);
+        }
+      }
+
+      await DisplayNextApprovalAsync();
+    }
+
+    private void ClearApprovalState(bool hideBanner = true)
+    {
+      _approvalQueue.Clear();
+      _activeApproval = null;
+
+      if (!hideBanner)
+        return;
+
+      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+      {
+        try
+        {
+          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+          ShowApprovalBanner(null);
+        }
+        catch
+        {
+          // ignore if control already disposed
+        }
+      });
     }
 
     private bool TryResolveExecApproval(CodexOptions.ApprovalMode mode, string signature, out bool approved, out string reason)

@@ -106,6 +106,41 @@
                                Text="Full Access mode is enabled. Codex may auto-approve exec commands and patches." />
                 </StackPanel>
             </Border>
+            <Border Name="ApprovalPromptBanner"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Name="ApprovalPromptText"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
+                               Text="Approve request?" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                        <CheckBox Name="ApprovalRememberCheckBox"
+                                  Content="Remember this decision for this session"
+                                  Margin="0,0,12,0"
+                                  Visibility="Collapsed"
+                                  VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Name="ApprovalApproveButton"
+                                    Width="80"
+                                    Margin="0,0,6,0"
+                                    Click="OnApprovalApproveClick">
+                                <AccessText Text="_Approve" />
+                            </Button>
+                            <Button Name="ApprovalDenyButton"
+                                    Width="80"
+                                    Click="OnApprovalDenyClick">
+                                <AccessText Text="_Deny" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
                     <Label Content="_Model:"
