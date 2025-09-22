@@ -815,6 +815,8 @@ namespace CodexVS22
         }
 
         await host.SendAsync(CreatePatchApprovalSubmission(callId, approved));
+        if (!approved)
+          await LogManualApprovalAsync("patch", signature, approved);
       }
       catch (Exception ex)
       {
@@ -873,6 +875,8 @@ namespace CodexVS22
         }
 
         await host.SendAsync(CreateExecApprovalSubmission(callId, approved));
+        if (!approved)
+          await LogManualApprovalAsync("exec", signature, approved);
       }
       catch (Exception ex)
       {
@@ -3312,6 +3316,21 @@ namespace CodexVS22
         var signaturePart = string.IsNullOrWhiteSpace(signature) ? string.Empty : $" [{signature}]";
         var reasonPart = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" via {reason}";
         await pane.WriteLineAsync($"[info] Auto-{decision} {kind}{signaturePart}{reasonPart}");
+      }
+      catch
+      {
+        // diagnostics best effort
+      }
+    }
+
+    private static async Task LogManualApprovalAsync(string kind, string signature, bool approved)
+    {
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        var decision = approved ? "approved" : "denied";
+        var signaturePart = string.IsNullOrWhiteSpace(signature) ? string.Empty : $" [{signature}]";
+        await pane.WriteLineAsync($"[info] Manual-{decision} {kind}{signaturePart}");
       }
       catch
       {
