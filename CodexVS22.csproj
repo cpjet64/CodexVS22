@@ -55,6 +55,7 @@
     <Compile Include="Core\CodexCliHost.cs" />
     <Compile Include="Core\Protocol\Events.cs" />
     <Compile Include="Core\ChatTextUtilities.cs" />
+    <Compile Include="Core\ApprovalSubmissionFactory.cs" />
     <Compile Include="Core\DiagnosticsPane.cs" />
     <Compile Include="CodexVS22Package.cs" />
     <Compile Include="source.extension.cs">

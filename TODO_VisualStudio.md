@@ -88,7 +88,7 @@ Execution Order
 - [x] [T5.7] Add a warning banner when in Full Access mode.
 - [x] [T5.8] Log denied approvals with reason code and context.
 - [x] [T5.9] Make approval prompts non-blocking and focus-safe.
-- [ ] [T5.10] Unit-test mapping from request events to approval submissions.
+- [x] [T5.10] Unit-test mapping from request events to approval submissions.
 - [ ] [T5.11] Persist last approval mode in Options and restore at startup.
 - [ ] [T5.12] Post-test: repeated prompts honor remembered decisions.
 

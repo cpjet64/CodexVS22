@@ -69,7 +69,6 @@ namespace CodexVS22
     private static readonly TaskCompletionSource<EnvironmentSnapshot> _environmentReadySource = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static int _environmentReadyInitialized;
 
-    private static long _approvalCounter;
     private readonly object _heartbeatLock = new();
     private Timer _heartbeatTimer;
     private HeartbeatState _heartbeatState;
@@ -824,7 +823,7 @@ namespace CodexVS22
         EnqueueFullAccessBannerRefresh();
         if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
-          await host.SendAsync(CreatePatchApprovalSubmission(callId, autoApproved));
+          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(callId, autoApproved));
           await LogAutoApprovalAsync("patch", signature, autoApproved, autoReason);
           await VS.StatusBar.ShowMessageAsync($"Codex patch {(autoApproved ? "approved" : "denied")} ({autoReason}).");
           return;
@@ -870,7 +869,7 @@ namespace CodexVS22
 
         if (TryResolveExecApproval(options.Mode, signature, out var autoApproved, out var autoReason))
         {
-          await host.SendAsync(CreateExecApprovalSubmission(callId, autoApproved));
+          await host.SendAsync(ApprovalSubmissionFactory.CreateExec(callId, autoApproved));
           await LogAutoApprovalAsync("exec", signature, autoApproved, autoReason);
           await VS.StatusBar.ShowMessageAsync($"Codex exec {(autoApproved ? "approved" : "denied")} ({autoReason}).");
           return;
@@ -3364,13 +3363,13 @@ namespace CodexVS22
       {
         if (request.Kind == ApprovalKind.Exec)
         {
-          await host.SendAsync(CreateExecApprovalSubmission(request.CallId, approved));
+          await host.SendAsync(ApprovalSubmissionFactory.CreateExec(request.CallId, approved));
           if (!approved)
             await LogManualApprovalAsync("exec", request.Signature, approved);
         }
         else
         {
-          await host.SendAsync(CreatePatchApprovalSubmission(request.CallId, approved));
+          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, approved));
           if (!approved)
             await LogManualApprovalAsync("patch", request.Signature, approved);
         }
@@ -4128,50 +4127,6 @@ namespace CodexVS22
       return submission.ToString(Formatting.None);
     }
 
-    private static string CreateExecApprovalSubmission(string requestId, bool approved)
-    {
-      var decision = approved ? "approved" : "denied";
-      var callId = requestId ?? string.Empty;
-      var submissionId = !string.IsNullOrEmpty(callId)
-        ? $"{callId}:exec_{Interlocked.Increment(ref _approvalCounter)}"
-        : Guid.NewGuid().ToString();
-
-      var submission = new JObject
-      {
-        ["id"] = submissionId,
-        ["op"] = new JObject
-        {
-          ["type"] = "exec_approval",
-          ["id"] = callId,
-          ["call_id"] = callId,
-          ["decision"] = decision,
-          ["approved"] = approved
-        }
-      };
-      return submission.ToString(Formatting.None);
-    }
-    private static string CreatePatchApprovalSubmission(string requestId, bool approved)
-    {
-      var decision = approved ? "approved" : "denied";
-      var callId = requestId ?? string.Empty;
-      var submissionId = !string.IsNullOrEmpty(callId)
-        ? $"{callId}:patch_{Interlocked.Increment(ref _approvalCounter)}"
-        : Guid.NewGuid().ToString();
-
-      var submission = new JObject
-      {
-        ["id"] = submissionId,
-        ["op"] = new JObject
-        {
-          ["type"] = "patch_approval",
-          ["id"] = callId,
-          ["call_id"] = callId,
-          ["decision"] = decision,
-          ["approved"] = approved
-        }
-      };
-      return submission.ToString(Formatting.None);
-    }
     private static async Task LogAssistantTextAsync(string text)
     {
       if (string.IsNullOrWhiteSpace(text))

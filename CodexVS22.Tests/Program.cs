@@ -20,6 +20,8 @@ internal static class Program
     RunTest(nameof(UserInputSubmission_NonAscii_RoundTrips), UserInputSubmission_NonAscii_RoundTrips);
     RunTest(nameof(UserInputSubmission_PasteFlowPreservesLines), UserInputSubmission_PasteFlowPreservesLines);
     RunTest(nameof(NormalizeAssistantText_NormalizesSmartQuotes), NormalizeAssistantText_NormalizesSmartQuotes);
+    RunTest(nameof(ExecApprovalSubmission_MatchesRequest), ExecApprovalSubmission_MatchesRequest);
+    RunTest(nameof(PatchApprovalSubmission_MatchesRequest), PatchApprovalSubmission_MatchesRequest);
 
     if (Failures.Count == 0)
     {
@@ -127,6 +129,30 @@ internal static class Program
     const string sample = "“Smart” — test… café";
     var normalized = ChatTextUtilities.NormalizeAssistantText(sample);
     AssertEqual("\"Smart\" - test... café", normalized, "Assistant text should normalize typographic characters");
+  }
+
+  private static void ExecApprovalSubmission_MatchesRequest()
+  {
+    var submission = ApprovalSubmissionFactory.CreateExec("call-123", approved: true);
+    var obj = JObject.Parse(submission);
+    AssertEqual("call-123", obj["op"]?["call_id"]?.ToString() ?? string.Empty, "Exec call id mismatch");
+    AssertEqual("approved", obj["op"]?["decision"]?.ToString() ?? string.Empty, "Exec decision mismatch");
+
+    submission = ApprovalSubmissionFactory.CreateExec(null, approved: false);
+    obj = JObject.Parse(submission);
+    AssertEqual("denied", obj["op"]?["decision"]?.ToString() ?? string.Empty, "Exec denied decision mismatch");
+  }
+
+  private static void PatchApprovalSubmission_MatchesRequest()
+  {
+    var submission = ApprovalSubmissionFactory.CreatePatch("patch-7", approved: false);
+    var obj = JObject.Parse(submission);
+    AssertEqual("patch-7", obj["op"]?["call_id"]?.ToString() ?? string.Empty, "Patch call id mismatch");
+    AssertEqual("denied", obj["op"]?["decision"]?.ToString() ?? string.Empty, "Patch decision mismatch");
+
+    submission = ApprovalSubmissionFactory.CreatePatch(null, approved: true);
+    obj = JObject.Parse(submission);
+    AssertEqual("approved", obj["op"]?["decision"]?.ToString() ?? string.Empty, "Patch approved decision mismatch");
   }
 
   private static void AssertEqual(string expected, string actual, string message)
