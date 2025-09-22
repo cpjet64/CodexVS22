@@ -25,6 +25,7 @@ using Microsoft.VisualStudio.Threading;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell.Interop;
+using System.Windows.Threading;
 using DteProject = EnvDTE.Project;
 using DteProjects = EnvDTE.Projects;
 using DteProjectItem = EnvDTE.ProjectItem;
@@ -400,6 +401,7 @@ namespace CodexVS22
 
       var auth = await _host.CheckAuthenticationAsync(_options, _workingDir);
       await HandleAuthenticationResultAsync(auth);
+      FocusInputBox();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -1038,12 +1040,13 @@ namespace CodexVS22
         _execTurns.Clear();
         _execCommandIndex.Clear();
         _execIdRemap.Clear();
-        _lastExecFallbackId = null;
-        _lastUserInput = string.Empty;
-        _assistantChunkCounter = 0;
-        ClearTokenUsage();
-        HideStreamErrorBanner();
-      }
+      _lastExecFallbackId = null;
+      _lastUserInput = string.Empty;
+      _assistantChunkCounter = 0;
+      ClearTokenUsage();
+      HideStreamErrorBanner();
+      FocusInputBox();
+    }
     }
 
     private async void OnCopyAllClick(object sender, RoutedEventArgs e)
@@ -3025,6 +3028,18 @@ namespace CodexVS22
       item.Click += OnCopyMessageMenuItemClick;
       menu.Items.Add(item);
       bubble.ContextMenu = menu;
+    }
+
+    private void FocusInputBox()
+    {
+      Dispatcher.BeginInvoke(new Action(() =>
+      {
+        if (this.FindName("InputBox") is TextBox input)
+        {
+          if (!input.IsKeyboardFocusWithin)
+            input.Focus();
+        }
+      }), DispatcherPriority.Input);
     }
 
     private async void OnCopyMessageMenuItemClick(object sender, RoutedEventArgs e)

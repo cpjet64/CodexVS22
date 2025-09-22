@@ -25,13 +25,27 @@
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                     <Button Name="LogoutButton"
-                            Content="Logout"
                             Margin="0,0,6,0"
                             Width="80"
                             Visibility="Collapsed"
-                            Click="OnLogoutClick" />
-                    <Button Content="Copy All" Width="90" Margin="0,0,6,0" Click="OnCopyAllClick" />
-                    <Button Content="Clear" Width="80" Click="OnClearClick" />
+                            KeyboardNavigation.TabIndex="6"
+                            AutomationProperties.Name="Log out"
+                            Click="OnLogoutClick">
+                        <AccessText Text="Lo_gout" />
+                    </Button>
+                    <Button Width="90"
+                            Margin="0,0,6,0"
+                            KeyboardNavigation.TabIndex="5"
+                            AutomationProperties.Name="Copy entire transcript"
+                            Click="OnCopyAllClick">
+                        <AccessText Text="Cop_y All" />
+                    </Button>
+                    <Button Width="80"
+                            KeyboardNavigation.TabIndex="4"
+                            AutomationProperties.Name="Clear transcript"
+                            Click="OnClearClick">
+                        <AccessText Text="_Clear" />
+                    </Button>
                 </StackPanel>
                 <TextBlock Text="Codex"
                            FontWeight="Bold"
@@ -58,39 +72,50 @@
                                Text="Codex login required. Click Login to continue." />
                     <Button Name="LoginButton"
                             Grid.Column="1"
-                            Content="Login"
                             Width="80"
+                            KeyboardNavigation.TabIndex="7"
+                            AutomationProperties.Name="Log in"
                             Margin="12,0,0,0"
-                            Click="OnLoginClick" />
+                            Click="OnLoginClick">
+                        <AccessText Text="_Login" />
+                    </Button>
                 </Grid>
             </Border>
             <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
-                    <TextBlock Text="Model:"
-                               Margin="0,0,4,0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <Label Content="_Model:"
+                           Margin="0,0,4,0"
+                           VerticalAlignment="Center"
+                           Target="{Binding ElementName=ModelCombo}"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
                     <ComboBox Name="ModelCombo"
                               Width="170"
                               SelectionChanged="OnModelSelectionChanged"
-                              VerticalAlignment="Center" />
+                              VerticalAlignment="Center"
+                              KeyboardNavigation.TabIndex="0"
+                              AutomationProperties.Name="Model selector" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Reasoning:"
-                               Margin="0,0,4,0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <Label Content="_Reasoning:"
+                           Margin="0,0,4,0"
+                           VerticalAlignment="Center"
+                           Target="{Binding ElementName=ReasoningCombo}"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
                     <ComboBox Name="ReasoningCombo"
                               Width="140"
                               SelectionChanged="OnReasoningSelectionChanged"
-                              VerticalAlignment="Center" />
+                              VerticalAlignment="Center"
+                              KeyboardNavigation.TabIndex="1"
+                              AutomationProperties.Name="Reasoning effort selector" />
                 </StackPanel>
             </StackPanel>
         </StackPanel>
         <Grid Grid.Row="1" Margin="6">
             <ScrollViewer VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Background="Transparent">
+                          Background="Transparent"
+                          AutomationProperties.Name="Chat transcript"
+                          AutomationProperties.AutomationId="TranscriptViewer">
                 <StackPanel Name="Transcript"
                             HorizontalAlignment="Stretch">
                     <TextBlock Text="Welcome to Codex for Visual Studio"
@@ -115,20 +140,33 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Name="StreamErrorText"
                                VerticalAlignment="Center"
+                               AutomationProperties.Name="Streaming error message"
                                Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
                                Text="Stream error" />
                     <Button Name="StreamRetryButton"
-                            Content="Retry"
                             Width="60"
                             Margin="12,0,0,0"
-                            Click="OnStreamRetryClick" />
-                    <Button Content="Dismiss"
-                            Width="70"
+                            KeyboardNavigation.TabIndex="8"
+                            AutomationProperties.Name="Retry streaming"
+                            Click="OnStreamRetryClick">
+                        <AccessText Text="_Retry" />
+                    </Button>
+                    <Button Width="70"
                             Margin="6,0,0,0"
-                            Click="OnStreamDismissClick" />
+                            KeyboardNavigation.TabIndex="9"
+                            AutomationProperties.Name="Dismiss streaming error"
+                            Click="OnStreamDismissClick">
+                        <AccessText Text="_Dismiss" />
+                    </Button>
                 </StackPanel>
             </Border>
             <DockPanel Grid.Row="1">
+                <Label Content="_Message:"
+                       DockPanel.Dock="Left"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0"
+                       Target="{Binding ElementName=InputBox}"
+                       Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
                     <TextBlock Name="TokenUsageText"
                                VerticalAlignment="Center"
@@ -139,7 +177,15 @@
                                VerticalAlignment="Center"
                                Margin="0,0,8,0"
                                Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <Button Name="SendButton" Content="Send" Width="80" Height="28" Margin="4,0,0,0" Click="OnSendClick" />
+                    <Button Name="SendButton"
+                            Width="80"
+                            Height="28"
+                            Margin="4,0,0,0"
+                            KeyboardNavigation.TabIndex="3"
+                            AutomationProperties.Name="Send message"
+                            Click="OnSendClick">
+                        <AccessText Text="_Send" />
+                    </Button>
                 </StackPanel>
                 <TextBox Name="InputBox"
                          AcceptsReturn="True"
@@ -148,6 +194,8 @@
                          PreviewKeyDown="OnInputPreviewKeyDown"
                          Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
                          Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                         KeyboardNavigation.TabIndex="2"
+                         AutomationProperties.Name="Chat message input"
                          BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}" />
             </DockPanel>
         </Grid>
