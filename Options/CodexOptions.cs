@@ -41,5 +41,30 @@ namespace CodexVS22
         [DisplayName("Default Reasoning Effort")]
         [Description("Reasoning effort to request (none, medium, high).")]
         public string DefaultReasoning { get; set; } = "medium";
+
+        [Category("Codex")]
+        [DisplayName("Window Width")]
+        [Description("Last width of the Codex tool window (when floating).")]
+        public double WindowWidth { get; set; } = 600;
+
+        [Category("Codex")]
+        [DisplayName("Window Height")]
+        [Description("Last height of the Codex tool window (when floating).")]
+        public double WindowHeight { get; set; } = 700;
+
+        [Category("Codex")]
+        [DisplayName("Window Left")]
+        [Description("Last X position of the Codex tool window (when floating).")]
+        public double WindowLeft { get; set; } = double.NaN;
+
+        [Category("Codex")]
+        [DisplayName("Window Top")]
+        [Description("Last Y position of the Codex tool window (when floating).")]
+        public double WindowTop { get; set; } = double.NaN;
+
+        [Category("Codex")]
+        [DisplayName("Window State")]
+        [Description("Last window state (Normal, Maximized).")]
+        public string WindowState { get; set; } = "Normal";
     }
 }
