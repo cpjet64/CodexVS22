@@ -21,5 +21,6 @@
     <Compile Include="..\Core\DiffModels.cs" Link="Core\DiffModels.cs" />
     <Compile Include="..\Core\DiagnosticsBuffer.cs" Link="Core\DiagnosticsBuffer.cs" />
     <Compile Include="..\Core\HealthMetrics.cs" Link="Core\HealthMetrics.cs" />
+    <Compile Include="..\Core\StatusBarHealthModel.cs" Link="Core\StatusBarHealthModel.cs" />
   </ItemGroup>
 </Project>

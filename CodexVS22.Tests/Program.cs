@@ -49,6 +49,7 @@ internal static class Program
     RunTest(nameof(Options_Validation_Rules_ClampAndDefaults), Options_Validation_Rules_ClampAndDefaults);
     RunTest(nameof(Options_Precendence_SolutionOverrides), Options_Precendence_SolutionOverrides);
     RunTest(nameof(HealthMetrics_Thresholds_ComputeLevels), HealthMetrics_Thresholds_ComputeLevels);
+    RunTest(nameof(StatusBarHealthModel_MapsToLabels), StatusBarHealthModel_MapsToLabels);
         RunTest(nameof(ExtractMcpTools_ParsesValidResponse), ExtractMcpTools_ParsesValidResponse);
         RunTest(nameof(ExtractMcpTools_HandlesEmptyResponse), ExtractMcpTools_HandlesEmptyResponse);
         RunTest(nameof(ExtractCustomPrompts_ParsesValidResponse), ExtractCustomPrompts_ParsesValidResponse);
@@ -508,6 +509,17 @@ internal static class Program
     AssertTrue(yellow.Level == CodexVS22.Core.HealthLevel.Yellow, "Yellow expected");
     var red = CodexVS22.Core.HealthMetrics.Compute(1, 3, 4, 120);
     AssertTrue(red.Level == CodexVS22.Core.HealthLevel.Red, "Red expected");
+  }
+
+  private static void StatusBarHealthModel_MapsToLabels()
+  {
+    var m = new CodexVS22.Core.StatusBarHealthModel();
+    m.Update(10, 0, 0, 10);
+    AssertEqual("Healthy", m.Label, "Green→Healthy");
+    m.Update(5, 1, 0, 80);
+    AssertEqual("Degraded", m.Label, "Yellow→Degraded");
+    m.Update(1, 3, 5, 200);
+    AssertEqual("Unstable", m.Label, "Red→Unstable");
   }
 
   private static void ExtractMcpTools_ParsesValidResponse()
