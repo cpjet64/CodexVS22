@@ -31,6 +31,7 @@ Test evidence
 - T8.8 validated with 2000 tools/prompts (<800ms). T8.12 validated with 5000 tools (<1.2s).
 - T8.5 verified last-used tool/prompt persistence via JSON round-trip.
 - T9.3 verified validation defaults/limits; CLI version check documented as Windows-only.
+- T9.7 health thresholds refined and wired to a status bar logic model (labels: Healthy/Degraded/Unstable).
 
 Windows dependencies (UI parity work)
 - Visual Studio 2022, Extensibility workload; MSBuild; VS experimental instance (/rootsuffix Exp).
