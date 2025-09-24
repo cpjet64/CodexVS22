@@ -19,5 +19,7 @@
     <Compile Include="..\Core\ApprovalSubmissionFactory.cs" Link="Core\ApprovalSubmissionFactory.cs" />
     <Compile Include="..\Core\DiffUtilities.cs" Link="Core\DiffUtilities.cs" />
     <Compile Include="..\Core\DiffModels.cs" Link="Core\DiffModels.cs" />
+    <Compile Include="..\Core\DiagnosticsBuffer.cs" Link="Core\DiagnosticsBuffer.cs" />
+    <Compile Include="..\Core\HealthMetrics.cs" Link="Core\HealthMetrics.cs" />
   </ItemGroup>
 </Project>

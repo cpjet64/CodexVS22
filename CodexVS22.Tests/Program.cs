@@ -43,6 +43,12 @@ internal static class Program
     RunTest(nameof(ExecTranscriptTracker_HandlesAnsiAndTrim), ExecTranscriptTracker_HandlesAnsiAndTrim);
     RunTest(nameof(ExecTranscriptTracker_CancelClearsState), ExecTranscriptTracker_CancelClearsState);
     RunTest(nameof(ExecConsole_LongRapidStream_Responsive), ExecConsole_LongRapidStream_Responsive);
+    RunTest(nameof(Mcp_LastUsed_RoundTrip_Persists), Mcp_LastUsed_RoundTrip_Persists);
+    RunTest(nameof(Mcp_LargeList_Extraction_Perf), Mcp_LargeList_Extraction_Perf);
+    RunTest(nameof(Mcp_LargeList_NoFreeze), Mcp_LargeList_NoFreeze);
+    RunTest(nameof(Options_Validation_Rules_ClampAndDefaults), Options_Validation_Rules_ClampAndDefaults);
+    RunTest(nameof(Options_Precendence_SolutionOverrides), Options_Precendence_SolutionOverrides);
+    RunTest(nameof(HealthMetrics_Thresholds_ComputeLevels), HealthMetrics_Thresholds_ComputeLevels);
         RunTest(nameof(ExtractMcpTools_ParsesValidResponse), ExtractMcpTools_ParsesValidResponse);
         RunTest(nameof(ExtractMcpTools_HandlesEmptyResponse), ExtractMcpTools_HandlesEmptyResponse);
         RunTest(nameof(ExtractCustomPrompts_ParsesValidResponse), ExtractCustomPrompts_ParsesValidResponse);
@@ -378,6 +384,130 @@ internal static class Program
     AssertTrue(txt.Length <= 5050, "Transcript should be near cap");
     AssertTrue(txt.Contains("$ exec tail -f"), "Transcript should retain header");
     AssertTrue(txt.Contains("line-0199"), "Transcript should contain last line");
+  }
+
+  // T8.5: persist last-used tool and prompt across sessions (round-trip)
+  private static void Mcp_LastUsed_RoundTrip_Persists()
+  {
+    var options = new CodexOptions { LastUsedTool = "tool.A", LastUsedPrompt = "prompt.B" };
+    var json = options.ExportToJson();
+    var options2 = new CodexOptions();
+    AssertTrue(options2.ImportFromJson(json), "Import should succeed");
+    AssertEqual("tool.A", options2.LastUsedTool, "LastUsedTool should persist");
+    AssertEqual("prompt.B", options2.LastUsedPrompt, "LastUsedPrompt should persist");
+  }
+
+  // T8.8: large-list extraction perf + tolerant parsing
+  private static void Mcp_LargeList_Extraction_Perf()
+  {
+    var tools = new JArray();
+    var prompts = new JArray();
+    for (int i = 0; i < 2000; i++)
+    {
+      var t = new JObject
+      {
+        [i % 3 == 0 ? "name" : (i % 3 == 1 ? "id" : "tool")] = $"t{i}",
+        [i % 3 == 0 ? "description" : (i % 3 == 1 ? "summary" : "detail")] = $"desc {i}",
+        [i % 3 == 0 ? "server" : (i % 3 == 1 ? "provider" : "source")] = i % 2 == 0 ? "fs" : "net"
+      };
+      tools.Add(t);
+      var p = new JObject
+      {
+        [i % 3 == 0 ? "id" : (i % 3 == 1 ? "key" : "identifier")] = $"p{i}",
+        [i % 3 == 0 ? "name" : (i % 3 == 1 ? "title" : "label")] = $"Prompt {i}",
+        [i % 3 == 0 ? "description" : (i % 3 == 1 ? "summary" : "detail")] = $"sum {i}",
+        [i % 3 == 0 ? "body" : (i % 3 == 1 ? "text" : "content")] = $"Body {i}",
+        [i % 3 == 0 ? "source" : (i % 3 == 1 ? "provider" : "origin")] = i % 2 == 0 ? "built-in" : "user"
+      };
+      prompts.Add(p);
+    }
+    var payloadTools = new JObject { ["tools"] = tools };
+    var payloadPrompts = new JObject { ["prompts"] = prompts };
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var extractedTools = ExtractMcpTools(payloadTools);
+    var extractedPrompts = ExtractCustomPrompts(payloadPrompts);
+    sw.Stop();
+
+    AssertEqual(2000, extractedTools.Count, "Should extract all tools");
+    AssertEqual(2000, extractedPrompts.Count, "Should extract all prompts");
+    AssertTrue(sw.ElapsedMilliseconds < 800, "Extraction should be performant (<800ms)");
+  }
+
+  // T8.12: ensure no freeze while loading large lists (timing threshold)
+  private static void Mcp_LargeList_NoFreeze()
+  {
+    var obj = JObject.Parse("{\"tools\":[],\"prompts\":[]}");
+    // Generate dynamically to include JSON parsing time
+    var arr = new JArray();
+    for (int i = 0; i < 5000; i++)
+      arr.Add(new JObject { ["name"] = $"t{i}", ["description"] = "x", ["server"] = "fs" });
+    obj["tools"] = arr;
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var list = ExtractMcpTools(obj);
+    sw.Stop();
+    AssertEqual(5000, list.Count, "All tools should be parsed");
+    AssertTrue(sw.ElapsedMilliseconds < 1200, "Parsing should complete under 1.2s");
+  }
+
+  // T9.3: options validation rules (clamp/defaults) + diagnostics export
+  private static void Options_Validation_Rules_ClampAndDefaults()
+  {
+    var o = new CodexOptions
+    {
+      DefaultModel = " ",
+      DefaultReasoning = "invalid",
+      WindowWidth = 50,
+      WindowHeight = 5000,
+      ExecConsoleHeight = 5,
+      ExecOutputBufferLimit = -1,
+      WindowState = "Bogus"
+    };
+    o.ValidateForTests();
+    AssertEqual("gpt-4.1", o.DefaultModel, "Model defaulted");
+    AssertEqual("medium", o.DefaultReasoning, "Reasoning defaulted");
+    AssertTrue(o.WindowWidth >= 300 && o.WindowWidth <= 2000, "Width clamped");
+    AssertTrue(o.WindowHeight >= 200 && o.WindowHeight <= 1500, "Height clamped");
+    AssertTrue(o.ExecConsoleHeight >= 50 && o.ExecConsoleHeight <= 800, "Exec height clamped");
+    AssertTrue(o.ExecOutputBufferLimit >= 0, "Buffer limit clamped");
+    AssertEqual("Normal", o.WindowState, "Window state defaulted");
+
+    CodexVS22.Core.DiagnosticsBuffer.Clear();
+    CodexVS22.Core.DiagnosticsBuffer.Add("line1");
+    CodexVS22.Core.DiagnosticsBuffer.Add("line2");
+    var text = CodexVS22.Core.DiagnosticsBuffer.ExportText();
+    AssertTrue(text.Contains("line1") && text.Contains("line2"), "Diagnostics export contains lines");
+  }
+
+  // T9.5: precedence (solution overrides) – extended
+  private static void Options_Precendence_SolutionOverrides()
+  {
+    var o = new CodexOptions
+    {
+      CliExecutable = "C\\global.exe",
+      UseWsl = true,
+      SolutionCliExecutable = "",
+      SolutionUseWsl = null
+    };
+    AssertEqual("C\\global.exe", o.GetEffectiveCliExecutable(), "Global CLI used");
+    AssertTrue(o.GetEffectiveUseWsl(), "Global WSL used");
+
+    o.SolutionCliExecutable = "C\\solution.exe";
+    o.SolutionUseWsl = false;
+    AssertEqual("C\\solution.exe", o.GetEffectiveCliExecutable(), "Solution CLI used");
+    AssertFalse(o.GetEffectiveUseWsl(), "Solution WSL used");
+  }
+
+  // T9.7: status-bar health indicator metrics and thresholds
+  private static void HealthMetrics_Thresholds_ComputeLevels()
+  {
+    var green = CodexVS22.Core.HealthMetrics.Compute(10, 0, 0, 10);
+    AssertTrue(green.Level == CodexVS22.Core.HealthLevel.Green, "Green expected");
+    var yellow = CodexVS22.Core.HealthMetrics.Compute(5, 1, 1, 60);
+    AssertTrue(yellow.Level == CodexVS22.Core.HealthLevel.Yellow, "Yellow expected");
+    var red = CodexVS22.Core.HealthMetrics.Compute(1, 3, 6, 5);
+    AssertTrue(red.Level == CodexVS22.Core.HealthLevel.Red, "Red expected");
   }
 
   private static void ExtractMcpTools_ParsesValidResponse()

@@ -100,5 +100,29 @@ namespace CodexVS22
       => !string.IsNullOrEmpty(SolutionCliExecutable) ? SolutionCliExecutable : CliExecutable;
 
     public bool GetEffectiveUseWsl() => SolutionUseWsl ?? UseWsl;
+
+    // Test-only validation mirroring logic-layer expectations.
+    public void ValidateForTests()
+    {
+      if (string.IsNullOrWhiteSpace(DefaultModel))
+        DefaultModel = "gpt-4.1";
+
+      var allowed = new[] { "none", "medium", "high" };
+      if (string.IsNullOrWhiteSpace(DefaultReasoning) ||
+          Array.IndexOf(allowed, DefaultReasoning.ToLowerInvariant()) < 0)
+        DefaultReasoning = "medium";
+
+      if (WindowWidth < 300 || WindowWidth > 2000)
+        WindowWidth = Math.Max(300, Math.Min(2000, WindowWidth));
+      if (WindowHeight < 200 || WindowHeight > 1500)
+        WindowHeight = Math.Max(200, Math.Min(1500, WindowHeight));
+      if (ExecConsoleHeight < 50 || ExecConsoleHeight > 800)
+        ExecConsoleHeight = Math.Max(50, Math.Min(800, ExecConsoleHeight));
+      if (ExecOutputBufferLimit < 0 || ExecOutputBufferLimit > 10000000)
+        ExecOutputBufferLimit = Math.Max(0, Math.Min(10000000, ExecOutputBufferLimit));
+      if (string.IsNullOrWhiteSpace(WindowState) ||
+          Array.IndexOf(new[] { "Normal", "Maximized", "Minimized" }, WindowState) < 0)
+        WindowState = "Normal";
+    }
   }
 }
