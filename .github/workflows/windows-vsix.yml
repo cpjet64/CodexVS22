@@ -47,6 +47,17 @@ jobs:
           Start-Sleep -Seconds 10
           Get-Process devenv | Stop-Process -Force
 
+      - name: Sign VSIX (optional)
+        if: env.CODESIGN_B64 && env.CODESIGN_PASS
+        shell: powershell
+        env:
+          CODESIGN_B64: ${{ secrets.CODESIGN_B64 }}
+          CODESIGN_PASS: ${{ secrets.CODESIGN_PASS }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP\\codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_B64))
+          & signtool sign /f $pfx /p $env:CODESIGN_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $env:VSIX_PATH
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -55,6 +66,7 @@ jobs:
             **/*.vsix
             **/build-log.txt
             **/Release/**
+          retention-days: 30
 
   sign:
     if: false
@@ -62,4 +74,3 @@ jobs:
     steps:
       - name: Placeholder for code signing
         run: echo "Signing disabled in stub; integrate later."
-
