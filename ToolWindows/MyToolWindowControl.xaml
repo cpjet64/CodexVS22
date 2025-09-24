@@ -34,10 +34,19 @@
                             Click="OnLogoutClick">
                         <AccessText Text="Lo_gout" />
                     </Button>
+                    <ToggleButton Name="ExecConsoleToggle"
+                                   Width="120"
+                                   Margin="0,0,6,0"
+                                   KeyboardNavigation.TabIndex="6"
+                                   AutomationProperties.Name="Show or hide exec console"
+                                   Checked="OnExecConsoleToggleChanged"
+                                   Unchecked="OnExecConsoleToggleChanged">
+                        <AccessText Text="Exec Co_nsole" />
+                    </ToggleButton>
                     <Button Name="CopyAllButton"
                             Width="90"
                             Margin="0,0,6,0"
-                            KeyboardNavigation.TabIndex="6"
+                            KeyboardNavigation.TabIndex="7"
                             AutomationProperties.Name="Copy entire transcript"
                             Click="OnCopyAllClick">
                         <AccessText Text="Cop_y All" />
@@ -45,13 +54,13 @@
                     <Button Name="ResetApprovalsButton"
                             Width="120"
                             Margin="0,0,6,0"
-                            KeyboardNavigation.TabIndex="5"
+                            KeyboardNavigation.TabIndex="8"
                             AutomationProperties.Name="Reset approvals"
                             Click="OnResetApprovalsClick">
                         <AccessText Text="Reset _Approvals" />
                     </Button>
                     <Button Width="80"
-                            KeyboardNavigation.TabIndex="4"
+                            KeyboardNavigation.TabIndex="9"
                             AutomationProperties.Name="Clear transcript"
                             Click="OnClearClick">
                         <AccessText Text="_Clear" />
@@ -61,6 +70,287 @@
                            FontWeight="Bold"
                            Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
             </DockPanel>
+            <Border Name="McpToolsContainer"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock Text="MCP Tools"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                        <Button Content="_Refresh"
+                                Width="80"
+                                DockPanel.Dock="Right"
+                                AutomationProperties.Name="Refresh MCP tools"
+                                Click="OnRefreshMcpToolsClick" />
+                    </DockPanel>
+                    <StackPanel Name="McpToolsEmptyText"
+                                Visibility="Collapsed">
+                        <TextBlock Text="No MCP tools available."
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="0,0,0,8" />
+                        <TextBlock Text="MCP (Model Context Protocol) servers provide tools and capabilities to Codex."
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="0,0,0,8" />
+                        <TextBlock Text="To configure MCP servers:"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="0,0,0,4" />
+                        <TextBlock Text="1. Create a codex.json file in your project root"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="16,0,0,2" />
+                        <TextBlock Text="2. Add MCP server configurations"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="16,0,0,2" />
+                        <TextBlock Text="3. Restart Codex or refresh tools"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Margin="16,0,0,8" />
+                        <Hyperlink Name="McpHelpLink"
+                                   Click="OnMcpHelpClick"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
+                            <Run Text="Learn more about MCP configuration" />
+                        </Hyperlink>
+                    </StackPanel>
+                    <ItemsControl Name="McpToolsList"
+                                  Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,4,0,4"
+                                        Padding="8"
+                                        Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
+                                        BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Cursor="Hand"
+                                        MouseLeftButtonDown="OnMcpToolClick"
+                                        MouseEnter="OnMcpToolMouseEnter"
+                                        MouseLeave="OnMcpToolMouseLeave">
+                                    <Border.Resources>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource {x:Static vsfx:VsBrushes.CommandBarHoverKey}}" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Resources>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                        <TextBlock Text="{Binding Description}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                                   Margin="0,4,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Text" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Server}"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                                   FontStyle="Italic"
+                                                   Margin="0,4,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Text" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+            <Border Name="McpToolRunsContainer"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="Tool Activity"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ItemsControl Name="McpToolRunsList"
+                                  Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,4,0,4">
+                                    <DockPanel>
+                                        <TextBlock Text="{Binding ToolName}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                        <TextBlock Text="{Binding StatusDisplay}"
+                                                   DockPanel.Dock="Right"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding Server}"
+                                               FontStyle="Italic"
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="Text" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding TimingDisplay}"
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="Text" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Detail}"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="Text" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+            <Border Name="CustomPromptsContainer"
+                    Margin="0,6,0,0"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
+                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                    BorderThickness="1"
+                    CornerRadius="3"
+                    Padding="6"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock Text="Prompt Library"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                        <Button Content="Re_fresh"
+                                Width="80"
+                                DockPanel.Dock="Right"
+                                AutomationProperties.Name="Refresh prompts"
+                                Click="OnRefreshPromptsClick" />
+                    </DockPanel>
+                    <TextBlock Name="CustomPromptsEmptyText"
+                               Text="No saved prompts available."
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                               Visibility="Collapsed" />
+                    <ItemsControl Name="CustomPromptsList"
+                                  Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,4,0,4"
+                                        Padding="8"
+                                        Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
+                                        BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        Cursor="Hand"
+                                        MouseLeftButtonDown="OnCustomPromptClick"
+                                        MouseEnter="OnCustomPromptMouseEnter"
+                                        MouseLeave="OnCustomPromptMouseLeave">
+                                    <Border.Resources>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource {x:Static vsfx:VsBrushes.CommandBarHoverKey}}" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Resources>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                            <TextBlock Text="{Binding SourceDisplay}"
+                                                       DockPanel.Dock="Right"
+                                                       FontStyle="Italic"
+                                                       Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding Description}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                                   Margin="0,4,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Text" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Name="PromptPreview"
+                                                   Text="{Binding Body}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                                   FontStyle="Italic"
+                                                   Margin="0,4,0,0"
+                                                   MaxHeight="60"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Visibility="Collapsed">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <Trigger Property="Text" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
             <Border Name="AuthBanner"
                     Margin="0,6,0,0"
                     Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"

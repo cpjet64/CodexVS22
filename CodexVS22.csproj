@@ -57,6 +57,8 @@
     <Compile Include="Core\ChatTextUtilities.cs" />
     <Compile Include="Core\ApprovalSubmissionFactory.cs" />
     <Compile Include="Core\DiagnosticsPane.cs" />
+    <Compile Include="Core\DiffUtilities.cs" />
+    <Compile Include="Core\DiffModels.cs" />
     <Compile Include="CodexVS22Package.cs" />
     <Compile Include="source.extension.cs">
       <AutoGen>True</AutoGen>

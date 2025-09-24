@@ -1,0 +1,1 @@
+Act as a senior VSIX engineer; execute TODO_VisualStudio.md from top to bottom, integrate with the Codex CLI via `codex proto` JSON lines, implement ToolWindow chat, editor context action, diff/exec/approvals, WSL fallback, tests and post-tests per subtask, commit per subtask with the required format, and deliver parity with the official Codex VS Code extension.

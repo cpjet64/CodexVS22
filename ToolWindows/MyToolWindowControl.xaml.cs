@@ -14,6 +14,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -22,7 +24,8 @@ using EnvDTE;
 using EnvDTE80;
 using CodexVS22.Core;
 using CodexVS22.Core.Protocol;
-using static CodexVS22.Core.DiffUtilities;
+// Bring nested DiffUtilities types into scope explicitly.
+using CodexVS22.Core;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
@@ -45,6 +48,10 @@ namespace CodexVS22
     private CodexCliHost _host;
     private readonly Dictionary<string, AssistantTurn> _assistantTurns = new();
     private readonly Dictionary<string, ExecTurn> _execTurns = new();
+    private readonly List<ExecTurn> _execConsoleTurns = new();
+    private readonly ObservableCollection<McpToolInfo> _mcpTools = new();
+    private readonly ObservableCollection<McpToolRun> _mcpToolRuns = new();
+    private readonly ObservableCollection<CustomPromptInfo> _customPrompts = new();
     private readonly Dictionary<string, string> _execCommandIndex = new();
     private readonly Dictionary<string, string> _execIdRemap = new();
     private readonly Dictionary<string, bool> _rememberedExecApprovals = new(StringComparer.Ordinal);
@@ -60,6 +67,8 @@ namespace CodexVS22
     private string _authMessage = string.Empty;
     private bool _authGatedSend;
     private string _lastExecFallbackId;
+    private double _execConsolePreferredHeight = 180.0;
+    private bool _suppressExecToggleEvent;
     private IVsSolution _solutionService;
     private SolutionEventsSink _solutionEvents;
     private uint _solutionEventsCookie;
@@ -72,7 +81,13 @@ namespace CodexVS22
     private string _lastKnownSolutionRoot = string.Empty;
     private string _lastKnownWorkspaceRoot = string.Empty;
     private static readonly TaskCompletionSource<EnvironmentSnapshot> _environmentReadySource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Dictionary<string, McpToolRun> _mcpToolRunIndex = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CustomPromptInfo> _customPromptIndex = new(StringComparer.Ordinal);
+    private const int MaxMcpToolRuns = 20;
     private static int _environmentReadyInitialized;
+    private DateTime _lastMcpToolsRefresh = DateTime.MinValue;
+    private DateTime _lastPromptsRefresh = DateTime.MinValue;
+    private const int RefreshDebounceSeconds = 2;
 
     private readonly object _heartbeatLock = new();
     private Timer _heartbeatTimer;
@@ -82,7 +97,7 @@ namespace CodexVS22
     private string _selectedModel = DefaultModelName;
     private string _selectedReasoning = DefaultReasoningValue;
     private CodexOptions.ApprovalMode _selectedApprovalMode = CodexOptions.ApprovalMode.Chat;
-    private Window _hostWindow;
+    private System.Windows.Window _hostWindow;
     private bool _windowEventsHooked;
     private ObservableCollection<DiffTreeItem> _diffTreeRoots = new();
     private Dictionary<string, DiffDocument> _diffDocuments = new(StringComparer.OrdinalIgnoreCase);
@@ -148,23 +163,193 @@ namespace CodexVS22
 
     private sealed class ExecTurn
     {
-      public ExecTurn(Border container, TextBlock body, TextBlock header, Button cancelButton, string normalizedCommand)
+      public ExecTurn(Border container, TextBlock body, TextBlock header, Button cancelButton, Button copyButton, Button clearButton, Button exportButton, string normalizedCommand)
       {
         Container = container;
         Body = body;
         Header = header;
         CancelButton = cancelButton;
+        CopyButton = copyButton;
+        ClearButton = clearButton;
+        ExportButton = exportButton;
         NormalizedCommand = normalizedCommand;
+        DefaultForeground = body?.Foreground;
       }
 
       public Border Container { get; }
       public TextBlock Body { get; }
       public TextBlock Header { get; }
       public Button CancelButton { get; }
+      public Button CopyButton { get; }
+      public Button ClearButton { get; }
+      public Button ExportButton { get; }
+      public Brush DefaultForeground { get; }
       public string ExecId { get; set; } = string.Empty;
       public bool CancelRequested { get; set; }
+      public bool IsRunning { get; set; }
       public string NormalizedCommand { get; set; }
       public StringBuilder Buffer { get; } = new StringBuilder();
+    }
+
+    private sealed class McpToolInfo
+    {
+      public McpToolInfo(string name, string description, string server)
+      {
+        Name = string.IsNullOrWhiteSpace(name) ? "(tool)" : name.Trim();
+        Description = description?.Trim() ?? string.Empty;
+        Server = server?.Trim() ?? string.Empty;
+      }
+
+      public string Name { get; }
+      public string Description { get; }
+      public string Server { get; }
+    }
+
+    private sealed class McpToolRun : INotifyPropertyChanged
+    {
+      private readonly StringBuilder _outputBuffer = new();
+      private string _statusDisplay;
+      private string _detail = string.Empty;
+      private string _timingDisplay;
+      private bool _isRunning = true;
+      private DateTimeOffset? _completedUtc;
+
+      public McpToolRun(string callId, string toolName, string server)
+      {
+        CallId = string.IsNullOrEmpty(callId) ? Guid.NewGuid().ToString() : callId;
+        ToolName = string.IsNullOrWhiteSpace(toolName) ? "(tool)" : toolName.Trim();
+        Server = server?.Trim() ?? string.Empty;
+        StartedUtc = DateTimeOffset.UtcNow;
+        _statusDisplay = "Running...";
+        _timingDisplay = $"Started {StartedUtc.ToLocalTime():HH:mm:ss}";
+      }
+
+      public string CallId { get; }
+      public string ToolName { get; }
+      public string Server { get; }
+      public DateTimeOffset StartedUtc { get; }
+
+      public string StatusDisplay
+      {
+        get => _statusDisplay;
+        private set => SetProperty(ref _statusDisplay, value, nameof(StatusDisplay));
+      }
+
+      public string Detail
+      {
+        get => _detail;
+        private set => SetProperty(ref _detail, value, nameof(Detail));
+      }
+
+      public string TimingDisplay
+      {
+        get => _timingDisplay;
+        private set => SetProperty(ref _timingDisplay, value, nameof(TimingDisplay));
+      }
+
+      public bool IsRunning
+      {
+        get => _isRunning;
+        private set => SetProperty(ref _isRunning, value, nameof(IsRunning));
+      }
+
+      public event PropertyChangedEventHandler PropertyChanged;
+
+      public void UpdateRunning(string statusText, string detail)
+      {
+        IsRunning = true;
+        _completedUtc = null;
+        StatusDisplay = string.IsNullOrWhiteSpace(statusText) ? "Running..." : statusText.Trim();
+        TimingDisplay = $"Started {StartedUtc.ToLocalTime():HH:mm:ss}";
+        _outputBuffer.Clear();
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+          _outputBuffer.Append(detail.Trim());
+          Detail = BuildSummary();
+        }
+        else
+        {
+          Detail = string.Empty;
+        }
+      }
+
+      public void AppendOutput(string text)
+      {
+        if (string.IsNullOrWhiteSpace(text))
+          return;
+
+        if (_outputBuffer.Length > 0)
+          _outputBuffer.AppendLine();
+        _outputBuffer.Append(text.Trim());
+        Detail = BuildSummary();
+      }
+
+      public void Complete(string statusText, bool? success, string detail)
+      {
+        IsRunning = false;
+        _completedUtc = DateTimeOffset.UtcNow;
+
+        var fallback = success.HasValue
+          ? (success.Value ? "Completed" : "Failed")
+          : "Completed";
+
+        StatusDisplay = string.IsNullOrWhiteSpace(statusText)
+          ? fallback
+          : statusText.Trim();
+
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+          if (_outputBuffer.Length > 0)
+            _outputBuffer.AppendLine();
+          _outputBuffer.Append(detail.Trim());
+        }
+
+        Detail = BuildSummary();
+
+        var duration = _completedUtc.Value - StartedUtc;
+        if (duration < TimeSpan.Zero)
+          duration = TimeSpan.Zero;
+
+        TimingDisplay = duration.TotalSeconds < 1
+          ? $"Finished in {duration.TotalMilliseconds:F0} ms"
+          : $"Finished in {duration.TotalSeconds:F1} s";
+      }
+
+      private string BuildSummary()
+      {
+        var summary = _outputBuffer.ToString().Trim();
+        if (summary.Length > 500)
+          summary = summary.Substring(0, 500) + "...";
+        return summary;
+      }
+
+      private void SetProperty<T>(ref T field, T value, string propertyName)
+      {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+          return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+      }
+    }
+
+    private sealed class CustomPromptInfo
+    {
+      public CustomPromptInfo(string id, string name, string description, string body, string source)
+      {
+        Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString() : id.Trim();
+        Name = string.IsNullOrWhiteSpace(name) ? "(prompt)" : name.Trim();
+        Description = description?.Trim() ?? string.Empty;
+        Body = body ?? string.Empty;
+        Source = source?.Trim() ?? string.Empty;
+      }
+
+      public string Id { get; }
+      public string Name { get; }
+      public string Description { get; }
+      public string Body { get; }
+      public string Source { get; }
+
+      public string SourceDisplay => string.IsNullOrEmpty(Source) ? string.Empty : Source;
     }
 
     private readonly struct CandidateSeed
@@ -303,6 +488,47 @@ namespace CodexVS22
       finally
       {
         _initializingSelectors = false;
+      }
+    }
+
+    private async Task RestoreLastUsedItemsAsync()
+    {
+      try
+      {
+        // Restore last used prompt if available
+        if (!string.IsNullOrEmpty(_options?.LastUsedPrompt))
+        {
+          var lastPrompt = _customPrompts.FirstOrDefault(p => p.Id == _options.LastUsedPrompt);
+          if (lastPrompt != null)
+          {
+            // Highlight the last used prompt in the UI
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            // Could add visual indication here if needed
+          }
+        }
+
+        // Restore last used tool if available
+        if (!string.IsNullOrEmpty(_options?.LastUsedTool))
+        {
+          var lastTool = _mcpTools.FirstOrDefault(t => t.Name == _options.LastUsedTool);
+          if (lastTool != null)
+          {
+            // Highlight the last used tool in the UI
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            // Could add visual indication here if needed
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        // Log error but don't fail initialization
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await LogTelemetryAsync("restore_last_used_failed", new Dictionary<string, object>
+          {
+            ["error"] = ex.Message
+          });
+        });
       }
     }
 
@@ -477,6 +703,8 @@ namespace CodexVS22
       _selectedModel = NormalizeModel(_options?.DefaultModel);
       _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
       _selectedApprovalMode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
+      _execConsolePreferredHeight = Math.Max(80, _options?.ExecConsoleHeight ?? 180.0);
+      ApplyExecConsoleToggleState();
       if (_options != null)
       {
         _options.DefaultModel = _selectedModel;
@@ -487,6 +715,10 @@ namespace CodexVS22
       await InitializeSelectorsAsync();
       await UpdateFullAccessBannerAsync();
       ApplyWindowPreferences();
+      InitializeMcpToolsUi();
+      
+      // Restore last used tool and prompt
+      await RestoreLastUsedItemsAsync();
 
       await AdviseSolutionEventsAsync();
 
@@ -509,6 +741,9 @@ namespace CodexVS22
       await HandleAuthenticationResultAsync(auth);
       FocusInputBox();
       UpdateTelemetryUi();
+
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("tool-window-loaded"));
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("tool-window-loaded"));
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -1048,6 +1283,7 @@ namespace CodexVS22
         _lastExecFallbackId = canonicalId;
 
         UpdateExecCancelState(turn, running: true);
+        _telemetry.BeginExec(canonicalId, normalizedCommand);
 
         var updatedHeader = turn.Header?.Text ?? header;
         if (!string.IsNullOrEmpty(updatedHeader) &&
@@ -1119,6 +1355,10 @@ namespace CodexVS22
             _execIdRemap[eventId] = execId;
         }
 
+        var exitCode = 0;
+        if (evt.Raw is JObject raw)
+          exitCode = TryGetInt(raw, "exit_code", "code", "status") ?? 0;
+
         if (_execTurns.TryGetValue(execId, out var turn))
         {
           AppendExecText(turn, "$ exec finished\n");
@@ -1131,6 +1371,7 @@ namespace CodexVS22
             _execCommandIndex.Remove(turn.NormalizedCommand);
           }
         }
+        _telemetry.CompleteExec(execId, exitCode);
         await WriteExecDiagnosticsAsync("$ exec finished");
         if (_lastExecFallbackId == execId)
           _lastExecFallbackId = null;
@@ -1138,11 +1379,146 @@ namespace CodexVS22
         RemoveExecIdMappings(execId);
         foreach (var key in _execCommandIndex.Where(kvp => string.Equals(kvp.Value, execId, StringComparison.Ordinal)).Select(kvp => kvp.Key).ToList())
           _execCommandIndex.Remove(key);
+
+        UpdateTelemetryUi();
       }
       catch (Exception ex)
       {
         var pane = await DiagnosticsPane.GetAsync();
         await pane.WriteLineAsync($"[error] HandleExecCommandEnd failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleListMcpTools(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var tools = ExtractMcpTools(evt.Raw);
+
+        _mcpTools.Clear();
+        foreach (var tool in tools)
+          _mcpTools.Add(tool);
+
+        UpdateMcpToolsUi();
+
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[info] MCP tools received: {_mcpTools.Count}.");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandleListMcpTools failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleListCustomPrompts(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var prompts = ExtractCustomPrompts(evt.Raw);
+
+        _customPrompts.Clear();
+        _customPromptIndex.Clear();
+        foreach (var prompt in prompts)
+        {
+          _customPrompts.Add(prompt);
+          _customPromptIndex[prompt.Id] = prompt;
+        }
+
+        UpdateCustomPromptsUi();
+
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[info] Custom prompts received: {_customPrompts.Count}.");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandleListCustomPrompts failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleToolCallBegin(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var raw = evt.Raw ?? new JObject();
+        var callId = ResolveToolCallId(evt);
+        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
+        var server = TryGetString(raw, "server", "provider", "source");
+        var status = TryGetString(raw, "status", "state");
+        var detail = FormatToolArguments(raw);
+
+        var run = EnsureToolRun(callId, toolName, server);
+        run.UpdateRunning(status, detail);
+        callId = run.CallId;
+
+        UpdateMcpToolRunsUi();
+
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[info] Tool call started: {run.ToolName} ({callId})");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandleToolCallBegin failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleToolCallOutput(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var raw = evt.Raw ?? new JObject();
+        var callId = ResolveToolCallId(evt);
+        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
+        var server = TryGetString(raw, "server", "provider", "source");
+        var run = EnsureToolRun(callId, toolName, server);
+        callId = run.CallId;
+
+        var output = ExtractToolOutputText(raw);
+        if (!string.IsNullOrWhiteSpace(output))
+          run.AppendOutput(output);
+
+        UpdateMcpToolRunsUi();
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandleToolCallOutput failed: {ex.Message}");
+      }
+    }
+
+    private async void HandleToolCallEnd(EventMsg evt)
+    {
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        var raw = evt.Raw ?? new JObject();
+        var callId = ResolveToolCallId(evt);
+        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
+        var server = TryGetString(raw, "server", "provider", "source");
+        var run = EnsureToolRun(callId, toolName, server);
+        callId = run.CallId;
+
+        var status = TryGetString(raw, "status", "state", "result", "outcome");
+        var success = TryGetBoolean(raw, "success", "ok", "completed") ?? InterpretToolStatus(status);
+        var detail = ExtractToolCompletionDetail(raw);
+
+        run.Complete(status, success, detail);
+        UpdateMcpToolRunsUi();
+
+        var pane = await DiagnosticsPane.GetAsync();
+        var outcome = success == false ? "failed" : "completed";
+        await pane.WriteLineAsync($"[info] Tool call {outcome}: {run.ToolName} ({callId})");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] HandleToolCallEnd failed: {ex.Message}");
       }
     }
 
@@ -1282,6 +1658,8 @@ namespace CodexVS22
         case EventKind.SessionConfigured:
           CodexVS22.Core.CodexCliHost.LastRolloutPath = TryGetString(evt.Raw, "rollout_path");
           ConfigureHeartbeat(evt);
+          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("session-configured"));
+          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("session-configured"));
           break;
         case EventKind.AgentMessageDelta:
           HandleAgentMessageDelta(evt);
@@ -1310,6 +1688,21 @@ namespace CodexVS22
         case EventKind.ExecCommandEnd:
           HandleExecCommandEnd(evt);
           break;
+        case EventKind.ListMcpTools:
+          HandleListMcpTools(evt);
+          break;
+        case EventKind.ListCustomPrompts:
+          HandleListCustomPrompts(evt);
+          break;
+        case EventKind.ToolCallBegin:
+          HandleToolCallBegin(evt);
+          break;
+        case EventKind.ToolCallOutput:
+          HandleToolCallOutput(evt);
+          break;
+        case EventKind.ToolCallEnd:
+          HandleToolCallEnd(evt);
+          break;
         case EventKind.TurnDiff:
           HandleTurnDiff(evt);
           break;
@@ -1335,10 +1728,14 @@ namespace CodexVS22
         if (this.FindName("InputBox") is TextBox box) box.Clear();
         _assistantTurns.Clear();
         _execTurns.Clear();
+        _execConsoleTurns.Clear();
         _execCommandIndex.Clear();
         _execIdRemap.Clear();
         _rememberedExecApprovals.Clear();
         _rememberedPatchApprovals.Clear();
+        _mcpToolRuns.Clear();
+        _mcpToolRunIndex.Clear();
+        UpdateMcpToolRunsUi();
         ClearApprovalState(hideBanner: false);
         ShowApprovalBanner(null);
         _lastExecFallbackId = null;
@@ -1510,6 +1907,12 @@ namespace CodexVS22
       private int _patchFailures;
       private double _patchSeconds;
       private DateTime? _patchStart;
+      private readonly Dictionary<string, DateTime> _execStarts = new(StringComparer.Ordinal);
+      private int _execCount;
+      private int _execNonZero;
+      private double _execSeconds;
+      private int _toolInvocations;
+      private int _promptInserts;
 
       public void BeginTurn()
       {
@@ -1575,6 +1978,48 @@ namespace CodexVS22
         _patchStart = null;
       }
 
+      public void BeginExec(string id, string command)
+      {
+        if (string.IsNullOrEmpty(id))
+          return;
+
+        _execStarts[id] = DateTime.UtcNow;
+      }
+
+      public void CompleteExec(string id, int exitCode)
+      {
+        if (string.IsNullOrEmpty(id))
+          return;
+
+        if (_execStarts.TryGetValue(id, out var start))
+        {
+          var elapsed = Math.Max(0.05, (DateTime.UtcNow - start).TotalSeconds);
+          _execSeconds += elapsed;
+          _execCount++;
+          if (exitCode != 0)
+            _execNonZero++;
+          _execStarts.Remove(id);
+        }
+      }
+
+      public void CancelExec(string id)
+      {
+        if (string.IsNullOrEmpty(id))
+          return;
+
+        _execStarts.Remove(id);
+      }
+
+      public void RecordToolInvocation()
+      {
+        _toolInvocations++;
+      }
+
+      public void RecordPromptInsert()
+      {
+        _promptInserts++;
+      }
+
       public void Reset()
       {
         _turns = 0;
@@ -1586,6 +2031,12 @@ namespace CodexVS22
         _patchFailures = 0;
         _patchSeconds = 0;
         _patchStart = null;
+        _execStarts.Clear();
+        _execCount = 0;
+        _execNonZero = 0;
+        _execSeconds = 0;
+        _toolInvocations = 0;
+        _promptInserts = 0;
       }
 
       public string GetSummary()
@@ -1604,6 +2055,22 @@ namespace CodexVS22
         {
           var avgSeconds = _patchSeconds / Math.Max(1, patchTotal);
           parts.Add($"Patch {_patchSuccesses}/{_patchFailures} avg {avgSeconds:F1}s");
+        }
+
+        if (_execCount > 0)
+        {
+          var avgSeconds = _execSeconds / Math.Max(1, _execCount);
+          parts.Add($"Exec {_execCount} avg {avgSeconds:F1}s fail {_execNonZero}");
+        }
+
+        if (_toolInvocations > 0)
+        {
+          parts.Add($"Tools {_toolInvocations}");
+        }
+
+        if (_promptInserts > 0)
+        {
+          parts.Add($"Prompts {_promptInserts}");
         }
 
         return parts.Count == 0 ? string.Empty : string.Join(" • ", parts);
@@ -1625,11 +2092,40 @@ namespace CodexVS22
         }
 
         ApplyWindowSettings(window);
-        HookWindowEvents(window);
+      HookWindowEvents(window);
       }), DispatcherPriority.Background);
     }
 
-    private void HookWindowEvents(Window window)
+    private void ApplyExecConsoleToggleState()
+    {
+      if (FindName("ExecConsoleToggle") is not ToggleButton toggle)
+        return;
+
+      _suppressExecToggleEvent = true;
+      toggle.IsChecked = _options?.ExecConsoleVisible ?? true;
+      _suppressExecToggleEvent = false;
+
+      foreach (var turn in _execConsoleTurns)
+        ApplyExecConsoleVisibility(turn);
+    }
+
+    private void InitializeMcpToolsUi()
+    {
+      if (FindName("McpToolsList") is ItemsControl list)
+        list.ItemsSource = _mcpTools;
+
+      if (FindName("McpToolRunsList") is ItemsControl runs)
+        runs.ItemsSource = _mcpToolRuns;
+
+      if (FindName("CustomPromptsList") is ItemsControl prompts)
+        prompts.ItemsSource = _customPrompts;
+
+      UpdateMcpToolsUi();
+      UpdateMcpToolRunsUi();
+      UpdateCustomPromptsUi();
+    }
+
+    private void HookWindowEvents(System.Windows.Window window)
     {
       if (window == null || _windowEventsHooked)
         return;
@@ -1652,7 +2148,7 @@ namespace CodexVS22
       _hostWindow = null;
     }
 
-    private void ApplyWindowSettings(Window window)
+    private void ApplyWindowSettings(System.Windows.Window window)
     {
       if (window == null || _options == null)
         return;
@@ -2970,9 +3466,35 @@ namespace CodexVS22
       public int OnQueryCloseSolution(object pUnkReserved, ref int pfCancel) => VSConstants.S_OK;
     }
 
-    private static string TryGetString(JObject obj, string name)
+    private static string TryGetString(JObject obj, params string[] names)
     {
-      try { return obj?[name]?.ToString(); } catch { return null; }
+      if (obj == null || names == null || names.Length == 0)
+        return null;
+
+      foreach (var name in names)
+      {
+        if (string.IsNullOrEmpty(name))
+          continue;
+
+        try
+        {
+          if (!obj.TryGetValue(name, out var token) || token == null || token.Type == JTokenType.Null)
+            continue;
+
+          var value = token.Type == JTokenType.String
+            ? token.Value<string>()
+            : token.ToString(Formatting.None);
+
+          if (!string.IsNullOrWhiteSpace(value))
+            return value;
+        }
+        catch
+        {
+          // ignore malformed tokens
+        }
+      }
+
+      return null;
     }
 
     private static int? TryGetInt(JObject obj, params string[] names)
@@ -3515,6 +4037,42 @@ namespace CodexVS22
       _execIdRemap[id] = id;
       _lastExecFallbackId = id;
       return id;
+    }
+
+    private static string ResolveToolCallId(EventMsg evt)
+    {
+      if (evt == null)
+        return string.Empty;
+
+      return TryGetString(evt.Raw, "call_id", "tool_call_id", "toolCallId", "id")
+        ?? evt.Id
+        ?? string.Empty;
+    }
+
+    private McpToolRun EnsureToolRun(string callId, string toolName, string server)
+    {
+      var key = string.IsNullOrEmpty(callId) ? Guid.NewGuid().ToString() : callId;
+
+      if (_mcpToolRunIndex.TryGetValue(key, out var existing))
+        return existing;
+
+      var run = new McpToolRun(key, toolName, server);
+      _mcpToolRunIndex[key] = run;
+      _mcpToolRuns.Insert(0, run);
+      TrimMcpToolRunsIfNeeded();
+      return run;
+    }
+
+    private void TrimMcpToolRunsIfNeeded()
+    {
+      while (_mcpToolRuns.Count > MaxMcpToolRuns)
+      {
+        var lastIndex = _mcpToolRuns.Count - 1;
+        var last = _mcpToolRuns[lastIndex];
+        _mcpToolRuns.RemoveAt(lastIndex);
+        if (last != null)
+          _mcpToolRunIndex.Remove(last.CallId);
+      }
     }
 
     private static string BuildExecHeader(string command, string cwd)
@@ -4635,6 +5193,370 @@ namespace CodexVS22
         if (this.FindName("StatusText") is TextBlock statusRetry)
           statusRetry.Text = "Exec cancel failed";
       }
+      else
+      {
+        _telemetry.CancelExec(execId);
+        UpdateTelemetryUi();
+      }
+    }
+
+    private async void OnExecCopyAllClick(object sender, RoutedEventArgs e)
+    {
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+        return;
+
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var text = ChatTextUtilities.StripAnsi(turn.Buffer.ToString()).TrimEnd('\n');
+        if (string.IsNullOrWhiteSpace(text))
+        {
+          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
+          return;
+        }
+
+        Clipboard.SetText(text);
+        await VS.StatusBar.ShowMessageAsync("Exec output copied to clipboard.");
+      }
+      catch (Exception ex)
+      {
+        try
+        {
+          var pane = await DiagnosticsPane.GetAsync();
+          await pane.WriteLineAsync($"[error] Exec copy failed: {ex.Message}");
+        }
+        catch
+        {
+          // diagnostics best effort
+        }
+      }
+    }
+
+    private async void OnExecClearClick(object sender, RoutedEventArgs e)
+    {
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+        return;
+
+      turn.Buffer.Clear();
+      RenderAnsiText(turn.Body, string.Empty, turn.DefaultForeground ?? turn.Body.Foreground);
+
+      if (this.FindName("StatusText") is TextBlock status)
+        status.Text = "Exec output cleared.";
+
+      try
+      {
+        await VS.StatusBar.ShowMessageAsync("Exec output cleared.");
+      }
+      catch
+      {
+        // status bar optional
+      }
+    }
+
+    private void OnExecConsoleToggleChanged(object sender, RoutedEventArgs e)
+    {
+      if (_suppressExecToggleEvent)
+        return;
+
+      if (FindName("ExecConsoleToggle") is not ToggleButton toggle)
+        return;
+
+      var visible = toggle.IsChecked == true;
+      if (_options != null)
+        _options.ExecConsoleVisible = visible;
+
+      foreach (var turn in _execConsoleTurns)
+        ApplyExecConsoleVisibility(turn);
+      UpdateMcpToolsUi();
+    }
+
+    private void OnRefreshMcpToolsClick(object sender, RoutedEventArgs e)
+    {
+      var now = DateTime.UtcNow;
+      var timeSinceLastRefresh = now - _lastMcpToolsRefresh;
+      
+      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
+      {
+        // Show debounce message
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
+        });
+        return;
+      }
+      
+      _lastMcpToolsRefresh = now;
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("user-refresh"));
+    }
+
+    private void OnMcpHelpClick(object sender, RoutedEventArgs e)
+    {
+      try
+      {
+        // Open MCP documentation in browser
+        var url = "https://codex.anthropic.com/docs/mcp";
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+          FileName = url,
+          UseShellExecute = true
+        });
+        
+        // Log telemetry for help link click
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await LogTelemetryAsync("mcp_help_clicked", new Dictionary<string, object>
+          {
+            ["url"] = url
+          });
+        });
+      }
+      catch (Exception ex)
+      {
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Failed to open MCP documentation: {ex.Message}");
+        });
+      }
+    }
+
+    private void OnRefreshPromptsClick(object sender, RoutedEventArgs e)
+    {
+      var now = DateTime.UtcNow;
+      var timeSinceLastRefresh = now - _lastPromptsRefresh;
+      
+      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
+      {
+        // Show debounce message
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
+        });
+        return;
+      }
+      
+      _lastPromptsRefresh = now;
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("user-refresh"));
+    }
+
+    private void OnCustomPromptClick(object sender, MouseButtonEventArgs e)
+    {
+      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
+        return;
+
+      try
+      {
+        // Insert the prompt body into the input box
+        if (FindName("InputBox") is TextBox inputBox)
+        {
+          var currentText = inputBox.Text ?? string.Empty;
+          var promptText = prompt.Body ?? string.Empty;
+          
+          if (string.IsNullOrWhiteSpace(currentText))
+          {
+            inputBox.Text = promptText;
+          }
+          else
+          {
+            // Insert at cursor position or append
+            var cursorPosition = inputBox.CaretIndex;
+            inputBox.Text = currentText.Insert(cursorPosition, promptText);
+            inputBox.CaretIndex = cursorPosition + promptText.Length;
+          }
+          
+          inputBox.Focus();
+          
+              // Track last used prompt
+              _options.LastUsedPrompt = prompt.Id;
+              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+              {
+                await VS.Settings.SaveAsync();
+              });
+
+              // Record telemetry for prompt insertion
+              _telemetryTracker.RecordPromptInsert();
+
+              // Log telemetry for prompt insertion
+              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+              {
+                await LogTelemetryAsync("prompt_inserted", new Dictionary<string, object>
+                {
+                  ["prompt_id"] = prompt.Id,
+                  ["prompt_name"] = prompt.Name,
+                  ["prompt_source"] = prompt.Source
+                });
+              });
+        }
+      }
+      catch (Exception ex)
+      {
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Failed to insert prompt: {ex.Message}");
+        });
+      }
+    }
+
+    private void OnMcpToolClick(object sender, MouseButtonEventArgs e)
+    {
+      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
+        return;
+
+      try
+      {
+        // Track last used tool
+        _options.LastUsedTool = tool.Name;
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+        {
+          await VS.Settings.SaveAsync();
+        });
+
+        // Record telemetry for tool invocation
+        _telemetryTracker.RecordToolInvocation();
+
+        // Log telemetry for tool selection
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+        {
+          await LogTelemetryAsync("tool_selected", new Dictionary<string, object>
+          {
+            ["tool_name"] = tool.Name,
+            ["tool_server"] = tool.Server
+          });
+        });
+        
+        // Show a message about the tool
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Selected tool: {tool.Name}");
+        });
+      }
+      catch (Exception ex)
+      {
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Failed to select tool: {ex.Message}");
+        });
+      }
+    }
+
+    private void OnMcpToolMouseEnter(object sender, MouseEventArgs e)
+    {
+      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
+        return;
+
+      try
+      {
+        // Show tool details on hover
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync($"Tool: {tool.Name} - {tool.Description}");
+        });
+      }
+      catch
+      {
+        // Ignore errors in hover
+      }
+    }
+
+    private void OnMcpToolMouseLeave(object sender, MouseEventArgs e)
+    {
+      if (sender is not Border border)
+        return;
+
+      try
+      {
+        // Clear status bar message
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+        {
+          await VS.StatusBar.ShowMessageAsync("");
+        });
+      }
+      catch
+      {
+        // Ignore errors in hover
+      }
+    }
+
+    private void OnCustomPromptMouseEnter(object sender, MouseEventArgs e)
+    {
+      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
+        return;
+
+      try
+      {
+        // Show preview of the prompt body
+        if (border.FindName("PromptPreview") is TextBlock preview)
+        {
+          preview.Visibility = Visibility.Visible;
+        }
+      }
+      catch
+      {
+        // Ignore errors in hover preview
+      }
+    }
+
+    private void OnCustomPromptMouseLeave(object sender, MouseEventArgs e)
+    {
+      if (sender is not Border border)
+        return;
+
+      try
+      {
+        // Hide preview of the prompt body
+        if (border.FindName("PromptPreview") is TextBlock preview)
+        {
+          preview.Visibility = Visibility.Collapsed;
+        }
+      }
+      catch
+      {
+        // Ignore errors in hover preview
+      }
+    }
+
+    private async void OnExecExportClick(object sender, RoutedEventArgs e)
+    {
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+        return;
+
+      try
+      {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var buffer = ChatTextUtilities.StripAnsi(turn.Buffer.ToString());
+        if (string.IsNullOrWhiteSpace(buffer))
+        {
+          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
+          return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+          Title = "Export Exec Output",
+          Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+          FileName = BuildExecExportFileName(turn)
+        };
+
+        var result = dialog.ShowDialog();
+        if (result != true || string.IsNullOrWhiteSpace(dialog.FileName))
+          return;
+
+        File.WriteAllText(dialog.FileName, buffer);
+        await VS.StatusBar.ShowMessageAsync($"Exec output saved to {Path.GetFileName(dialog.FileName)}.");
+      }
+      catch (Exception ex)
+      {
+        try
+        {
+          var pane = await DiagnosticsPane.GetAsync();
+          await pane.WriteLineAsync($"[error] Exec export failed: {ex.Message}");
+        }
+        catch
+        {
+          // diagnostics best effort
+        }
+      }
     }
 
     private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)
@@ -4848,6 +5770,255 @@ namespace CodexVS22
         _execIdRemap.Remove(key);
     }
 
+    private static readonly Regex AnsiCodeRegex = new("\x1B\\[(?<code>[0-9;]*)m", RegexOptions.Compiled);
+
+    private static readonly Brush[] AnsiBrushes =
+    {
+      Brushes.DimGray,      // black
+      Brushes.IndianRed,    // red
+      Brushes.SeaGreen,     // green
+      Brushes.Goldenrod,    // yellow
+      Brushes.SteelBlue,    // blue
+      Brushes.Orchid,       // magenta
+      Brushes.Teal,         // cyan
+      Brushes.Gainsboro     // white
+    };
+
+    private static readonly Brush[] AnsiBrightBrushes =
+    {
+      Brushes.LightGray,
+      Brushes.Red,
+      Brushes.LimeGreen,
+      Brushes.Yellow,
+      Brushes.DeepSkyBlue,
+      Brushes.MediumOrchid,
+      Brushes.Aqua,
+      Brushes.White
+    };
+
+    private void OnExecContainerPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+      if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
+        return;
+
+      if (sender is not Border border || border.Tag is not ExecTurn turn)
+        return;
+
+      e.Handled = true;
+
+      var delta = e.Delta > 0 ? 20 : -20;
+      var newHeight = Math.Max(80, Math.Min(600, border.MaxHeight + delta));
+      border.MaxHeight = newHeight;
+      _execConsolePreferredHeight = newHeight;
+
+      if (_options != null)
+        _options.ExecConsoleHeight = newHeight;
+
+      ApplyExecConsoleVisibility(turn);
+    }
+
+    private void ApplyExecConsoleVisibility(ExecTurn turn)
+    {
+      if (turn?.Container == null)
+        return;
+
+      var show = ShouldShowExecTurn(turn?.IsRunning ?? false);
+      turn.Container.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+      if (show)
+        turn.Container.MaxHeight = _execConsolePreferredHeight;
+    }
+
+    private bool ShouldShowExecTurn(bool running)
+    {
+      if (running)
+        return true;
+
+      if (_options?.AutoHideExecConsole ?? false)
+        return false;
+
+      return _options?.ExecConsoleVisible ?? true;
+    }
+
+    private async Task RequestMcpToolsAsync(string reason)
+    {
+      var host = _host;
+      if (host == null)
+        return;
+
+      try
+      {
+        var submission = new JObject
+        {
+          ["id"] = Guid.NewGuid().ToString(),
+          ["op"] = new JObject
+          {
+            ["type"] = "list_mcp_tools"
+          }
+        };
+
+        var json = submission.ToString(Formatting.None);
+        var ok = await host.SendAsync(json);
+        var pane = await DiagnosticsPane.GetAsync();
+        if (ok)
+          await pane.WriteLineAsync($"[info] Requested MCP tools ({reason}).");
+        else
+          await pane.WriteLineAsync($"[warn] Failed to request MCP tools ({reason}).");
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] RequestMcpToolsAsync failed: {ex.Message}");
+      }
+    }
+
+    private async Task RequestCustomPromptsAsync(string reason)
+    {
+      var host = _host;
+      if (host == null)
+        return;
+
+      try
+      {
+        var submission = new JObject
+        {
+          ["id"] = Guid.NewGuid().ToString(),
+          ["op"] = new JObject
+          {
+            ["type"] = "list_custom_prompts"
+          }
+        };
+
+        var json = submission.ToString(Formatting.None);
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[info] Requesting custom prompts ({reason}).");
+        await host.SendAsync(json);
+      }
+      catch (Exception ex)
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        await pane.WriteLineAsync($"[error] RequestCustomPromptsAsync failed: {ex.Message}");
+      }
+    }
+
+    private void ApplyExecBufferLimit(ExecTurn turn)
+    {
+      if (turn?.Buffer == null)
+        return;
+
+      var limit = _options?.ExecOutputBufferLimit ?? 0;
+      if (limit <= 0)
+        return;
+
+      if (turn.Buffer.Length <= limit)
+        return;
+
+      var excess = turn.Buffer.Length - limit;
+      if (excess < limit / 5)
+        excess = limit / 5;
+
+      turn.Buffer.Remove(0, excess);
+    }
+
+    private static string BuildExecExportFileName(ExecTurn turn)
+    {
+      var source = !string.IsNullOrWhiteSpace(turn?.NormalizedCommand)
+        ? turn.NormalizedCommand
+        : turn?.ExecId;
+
+      var safe = SanitizeFileName(source);
+      if (string.IsNullOrEmpty(safe))
+        safe = "codex-exec";
+
+      var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+      return $"{safe}-{timestamp}.txt";
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+      if (string.IsNullOrWhiteSpace(name))
+        return string.Empty;
+
+      var invalid = Path.GetInvalidFileNameChars();
+      var builder = new StringBuilder(name.Length);
+      foreach (var ch in name)
+      {
+        if (invalid.Contains(ch) || char.IsControl(ch))
+        {
+          builder.Append('-');
+          continue;
+        }
+
+        builder.Append(ch);
+      }
+
+      var sanitized = builder.ToString().Trim('-');
+      if (sanitized.Length > 80)
+        sanitized = sanitized.Substring(0, 80);
+
+      return sanitized;
+    }
+
+    private void UpdateMcpToolsUi()
+    {
+      if (FindName("McpToolsContainer") is not Border container ||
+          FindName("McpToolsEmptyText") is not StackPanel emptyPanel ||
+          FindName("McpToolsList") is not ItemsControl list)
+        return;
+
+      if (list.ItemsSource != _mcpTools)
+        list.ItemsSource = _mcpTools;
+
+      if (_mcpTools.Count == 0)
+      {
+        emptyPanel.Visibility = Visibility.Visible;
+        container.Visibility = Visibility.Visible;
+      }
+      else
+      {
+        emptyPanel.Visibility = Visibility.Collapsed;
+        container.Visibility = Visibility.Visible;
+      }
+
+      UpdateMcpToolRunsUi();
+    }
+
+    private void UpdateMcpToolRunsUi()
+    {
+      if (FindName("McpToolRunsContainer") is not Border container ||
+          FindName("McpToolRunsList") is not ItemsControl list)
+        return;
+
+      if (list.ItemsSource != _mcpToolRuns)
+        list.ItemsSource = _mcpToolRuns;
+
+      container.Visibility = _mcpToolRuns.Count > 0
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+    }
+
+    private void UpdateCustomPromptsUi()
+    {
+      if (FindName("CustomPromptsContainer") is not Border container ||
+          FindName("CustomPromptsList") is not ItemsControl list ||
+          FindName("CustomPromptsEmptyText") is not TextBlock empty)
+        return;
+
+      if (list.ItemsSource != _customPrompts)
+        list.ItemsSource = _customPrompts;
+
+      if (_customPrompts.Count == 0)
+      {
+        empty.Visibility = Visibility.Visible;
+        container.Visibility = Visibility.Visible;
+      }
+      else
+      {
+        empty.Visibility = Visibility.Collapsed;
+        container.Visibility = Visibility.Visible;
+      }
+    }
+
     private static void AppendExecText(ExecTurn turn, string text)
     {
       if (turn == null || string.IsNullOrEmpty(text))
@@ -4856,26 +6027,150 @@ namespace CodexVS22
       turn.Buffer.Append(text);
       if (!text.EndsWith("\n", StringComparison.Ordinal))
         turn.Buffer.Append('\n');
-      turn.Body.Text = turn.Buffer.ToString();
+
+      ApplyExecBufferLimit(turn);
+
+      var bufferText = turn.Buffer.ToString();
+      RenderAnsiText(turn.Body, bufferText, turn.DefaultForeground ?? turn.Body.Foreground);
+    }
+
+    private static void RenderAnsiText(TextBlock block, string text, Brush defaultBrush)
+    {
+      if (block == null)
+        return;
+
+      block.Inlines.Clear();
+
+      if (string.IsNullOrEmpty(text))
+        return;
+
+      var currentBrush = defaultBrush;
+      var isBold = false;
+      var lastIndex = 0;
+
+      foreach (Match match in AnsiCodeRegex.Matches(text))
+      {
+        if (match.Index > lastIndex)
+        {
+          var segment = text.Substring(lastIndex, match.Index - lastIndex);
+          AppendAnsiSegment(block, segment, currentBrush, isBold);
+        }
+
+        var codes = match.Groups["code"].Value;
+        UpdateAnsiState(codes, defaultBrush, ref currentBrush, ref isBold);
+        lastIndex = match.Index + match.Length;
+      }
+
+      if (lastIndex < text.Length)
+      {
+        var tail = text.Substring(lastIndex);
+        AppendAnsiSegment(block, tail, currentBrush, isBold);
+      }
+    }
+
+    private static void AppendAnsiSegment(TextBlock block, string segment, Brush brush, bool bold)
+    {
+      if (block == null || string.IsNullOrEmpty(segment))
+        return;
+
+      var sanitized = segment.Replace("\r", string.Empty);
+      if (sanitized.Length == 0)
+        return;
+
+      var run = new Run(sanitized)
+      {
+        Foreground = brush,
+        FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal
+      };
+      block.Inlines.Add(run);
+    }
+
+    private static void UpdateAnsiState(string codes, Brush defaultBrush, ref Brush brush, ref bool bold)
+    {
+      if (defaultBrush == null)
+        defaultBrush = Brushes.Gainsboro;
+
+      if (string.IsNullOrEmpty(codes))
+      {
+        brush = defaultBrush;
+        bold = false;
+        return;
+      }
+
+      var parts = codes.Split(';');
+      foreach (var part in parts)
+      {
+        if (string.IsNullOrWhiteSpace(part))
+        {
+          brush = defaultBrush;
+          bold = false;
+          continue;
+        }
+
+        if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
+          continue;
+
+        switch (code)
+        {
+          case 0:
+            brush = defaultBrush;
+            bold = false;
+            break;
+          case 1:
+            bold = true;
+            break;
+          case 22:
+            bold = false;
+            break;
+          case 39:
+            brush = defaultBrush;
+            break;
+          default:
+            if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
+            {
+              var resolved = ResolveAnsiBrush(code);
+              if (resolved != null)
+                brush = resolved;
+            }
+            break;
+        }
+      }
+    }
+
+    private static Brush ResolveAnsiBrush(int code)
+    {
+      var bright = false;
+      if (code >= 90 && code <= 97)
+      {
+        bright = true;
+        code -= 60;
+      }
+
+      var index = code - 30;
+      if (index < 0 || index >= AnsiBrushes.Length)
+        return null;
+
+      return bright ? AnsiBrightBrushes[index] : AnsiBrushes[index];
     }
 
     private void UpdateExecCancelState(ExecTurn turn, bool running)
     {
-      if (turn?.CancelButton == null)
+      if (turn == null)
         return;
 
+      turn.IsRunning = running;
+      turn.CancelRequested = false;
+
+      if (turn.CancelButton != null)
+      {
+        turn.CancelButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        turn.CancelButton.IsEnabled = true;
+      }
+
+      ApplyExecConsoleVisibility(turn);
+
       if (running)
-      {
-        turn.CancelRequested = false;
-        turn.CancelButton.Visibility = Visibility.Visible;
-        turn.CancelButton.IsEnabled = true;
-      }
-      else
-      {
-        turn.CancelButton.Visibility = Visibility.Collapsed;
-        turn.CancelButton.IsEnabled = true;
-        turn.CancelRequested = false;
-      }
+        ScrollTranscriptToEnd();
     }
 
     private AssistantTurn GetOrCreateAssistantTurn(string id)
@@ -4961,6 +6256,11 @@ namespace CodexVS22
         if (sender is MenuItem item && item.Tag is TextBlock bubble)
         {
           var text = bubble.Text ?? string.Empty;
+          if (bubble.Tag is ExecTurn execTurn)
+          {
+            var buffer = execTurn.Buffer.ToString();
+            text = ChatTextUtilities.StripAnsi(buffer).TrimEnd('\n');
+          }
           if (string.IsNullOrWhiteSpace(text))
             return;
           Clipboard.SetText(text);
@@ -5106,23 +6406,39 @@ namespace CodexVS22
         Margin = new Thickness(20, 4, 80, 4),
         BorderThickness = new Thickness(1),
         MaxWidth = 600,
-        HorizontalAlignment = HorizontalAlignment.Left
+        HorizontalAlignment = HorizontalAlignment.Left,
+        Visibility = Visibility.Collapsed
       };
       ApplyExecBubbleBrush(container);
 
       var panel = new StackPanel();
       var headerTextValue = string.IsNullOrWhiteSpace(headerText) ? "$ exec" : headerText.Trim();
+
+      Button CreateHeaderButton(string accessText, RoutedEventHandler handler, double minWidth, Thickness? margin = null)
+      {
+        var button = new Button
+        {
+          Content = new AccessText { Text = accessText },
+          Margin = margin ?? new Thickness(6, 0, 0, 4),
+          MinWidth = minWidth,
+          Height = 24,
+          HorizontalAlignment = HorizontalAlignment.Left
+        };
+        button.Click += handler;
+        return button;
+      }
+
+      var cancelButton = CreateHeaderButton("_Cancel", OnExecCancelClick, 70, new Thickness(8, 0, 0, 4));
+      cancelButton.Visibility = Visibility.Collapsed;
+
+      var copyButton = CreateHeaderButton("Cop_y All", OnExecCopyAllClick, 80);
+      var clearButton = CreateHeaderButton("C_lear Output", OnExecClearClick, 100);
+      var exportButton = CreateHeaderButton("_Export", OnExecExportClick, 80);
+
       TextBlock headerBlock = null;
-      Button cancelButton = null;
 
       if (!string.IsNullOrEmpty(headerTextValue))
       {
-        var headerRow = new StackPanel
-        {
-          Orientation = Orientation.Horizontal,
-          VerticalAlignment = VerticalAlignment.Center
-        };
-
         headerBlock = new TextBlock
         {
           Text = headerTextValue,
@@ -5133,29 +6449,20 @@ namespace CodexVS22
         };
         headerBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
 
-        cancelButton = new Button
+        var headerRow = new StackPanel
         {
-          Content = new AccessText { Text = "_Cancel" },
-          Margin = new Thickness(8, 0, 0, 4),
-          MinWidth = 70,
-          Height = 24,
-          Visibility = Visibility.Collapsed,
-          HorizontalAlignment = HorizontalAlignment.Left
+          Orientation = Orientation.Horizontal,
+          VerticalAlignment = VerticalAlignment.Center
         };
-        cancelButton.Click += OnExecCancelClick;
 
         headerRow.Children.Add(headerBlock);
         headerRow.Children.Add(cancelButton);
+        headerRow.Children.Add(copyButton);
+        headerRow.Children.Add(clearButton);
+        headerRow.Children.Add(exportButton);
         panel.Children.Add(headerRow);
       }
-
-      cancelButton ??= new Button
-      {
-        Visibility = Visibility.Collapsed,
-        IsEnabled = false
-      };
-
-      if (headerBlock == null)
+      else
       {
         var buttonRow = new StackPanel
         {
@@ -5164,13 +6471,15 @@ namespace CodexVS22
           Margin = new Thickness(0, 0, 0, 4)
         };
         buttonRow.Children.Add(cancelButton);
+        buttonRow.Children.Add(copyButton);
+        buttonRow.Children.Add(clearButton);
+        buttonRow.Children.Add(exportButton);
         panel.Children.Add(buttonRow);
       }
 
       var bodyBlock = new TextBlock
       {
         Text = string.Empty,
-        Tag = "exec",
         TextWrapping = TextWrapping.Wrap,
         FontFamily = new FontFamily("Consolas"),
         Visibility = Visibility.Visible
@@ -5182,7 +6491,21 @@ namespace CodexVS22
       container.Child = panel;
       transcript.Children.Add(container);
 
-      return new ExecTurn(container, bodyBlock, headerBlock, cancelButton, normalizedCommand);
+      var execTurn = new ExecTurn(container, bodyBlock, headerBlock, cancelButton, copyButton, clearButton, exportButton, normalizedCommand);
+      bodyBlock.Tag = execTurn;
+      copyButton.Tag = execTurn;
+      clearButton.Tag = execTurn;
+      exportButton.Tag = execTurn;
+      container.Tag = execTurn;
+      container.MaxHeight = _execConsolePreferredHeight;
+      container.PreviewMouseWheel += OnExecContainerPreviewMouseWheel;
+
+      _execConsoleTurns.Add(execTurn);
+      if (_execConsoleTurns.Count > 50)
+        _execConsoleTurns.RemoveAt(0);
+      ApplyExecConsoleVisibility(execTurn);
+
+      return execTurn;
     }
 
     private ExecTurn GetOrCreateExecTurn(string id, string header, string normalizedCommand)
@@ -5204,6 +6527,15 @@ namespace CodexVS22
       turn.ExecId = id;
       if (turn.CancelButton != null)
         turn.CancelButton.Tag = id;
+
+      if (turn.CopyButton != null)
+        turn.CopyButton.Tag = turn;
+
+      if (turn.ClearButton != null)
+        turn.ClearButton.Tag = turn;
+
+      if (turn.ExportButton != null)
+        turn.ExportButton.Tag = turn;
 
       if (!string.IsNullOrEmpty(normalizedCommand) && string.IsNullOrEmpty(turn.NormalizedCommand))
         turn.NormalizedCommand = normalizedCommand;
@@ -5257,6 +6589,136 @@ namespace CodexVS22
 
       text = CollectText(evt.Raw);
       return ChatTextUtilities.StripAnsi(text);
+    }
+
+    private static IReadOnlyList<McpToolInfo> ExtractMcpTools(JObject obj)
+    {
+      var results = new List<McpToolInfo>();
+      if (obj == null)
+        return results;
+
+      var toolsToken = obj["tools"] ?? obj["items"];
+      if (toolsToken is not JArray array)
+        return results;
+
+      foreach (var token in array)
+      {
+        if (token is not JObject toolObj)
+          continue;
+
+        var name = TryGetString(toolObj, "name", "id", "tool");
+        var description = TryGetString(toolObj, "description", "summary", "detail");
+        var server = TryGetString(toolObj, "server", "provider", "source");
+        results.Add(new McpToolInfo(name, description, server));
+      }
+
+      return results;
+    }
+
+    private static IReadOnlyList<CustomPromptInfo> ExtractCustomPrompts(JObject obj)
+    {
+      var results = new List<CustomPromptInfo>();
+      if (obj == null)
+        return results;
+
+      var promptsToken = obj["prompts"] ?? obj["items"] ?? obj["data"];
+      if (promptsToken is not JArray array)
+        return results;
+
+      foreach (var token in array)
+      {
+        if (token is not JObject promptObj)
+          continue;
+
+        var id = TryGetString(promptObj, "id", "prompt_id", "promptId", "name");
+        var name = TryGetString(promptObj, "name", "title", "label");
+        var description = TryGetString(promptObj, "description", "summary", "detail", "notes");
+        var body = TryGetString(promptObj, "body", "content", "text", "prompt");
+        var source = TryGetString(promptObj, "source", "provider", "server", "scope");
+
+        results.Add(new CustomPromptInfo(id, name, description, body, source));
+      }
+
+      return results;
+    }
+
+    private static string FormatToolArguments(JObject raw)
+    {
+      if (raw == null)
+        return string.Empty;
+
+      var direct = TryGetString(raw, "arguments_preview", "input_preview", "input_summary");
+      if (!string.IsNullOrWhiteSpace(direct))
+        return direct.Trim();
+
+      var token = raw["arguments"] ?? raw["args"] ?? raw["input"] ?? raw["parameters"];
+      var text = FormatCompactText(token);
+      if (string.IsNullOrEmpty(text))
+        return string.Empty;
+
+      return text.StartsWith("Args:", StringComparison.OrdinalIgnoreCase)
+        ? text
+        : $"Args: {text}";
+    }
+
+    private static string ExtractToolOutputText(JObject raw)
+    {
+      if (raw == null)
+        return string.Empty;
+
+      var direct = TryGetString(raw, "text", "delta", "chunk", "output", "message", "value");
+      if (!string.IsNullOrWhiteSpace(direct))
+        return direct.Trim();
+
+      var token = raw["output"] ?? raw["result"] ?? raw["data"] ?? raw["response"];
+      return FormatCompactText(token);
+    }
+
+    private static string ExtractToolCompletionDetail(JObject raw)
+    {
+      if (raw == null)
+        return string.Empty;
+
+      var direct = TryGetString(raw, "detail", "message", "result_text", "result", "output", "error");
+      if (!string.IsNullOrWhiteSpace(direct))
+        return direct.Trim();
+
+      var token = raw["result"] ?? raw["output"] ?? raw["response"];
+      return FormatCompactText(token);
+    }
+
+    private static bool? InterpretToolStatus(string status)
+    {
+      if (string.IsNullOrWhiteSpace(status))
+        return null;
+
+      var normalized = status.Trim().ToLowerInvariant();
+      if (normalized is "success" or "succeeded" or "ok" or "completed" or "complete" or "done")
+        return true;
+      if (normalized is "fail" or "failed" or "error" or "errored" or "cancelled" or "canceled" or "aborted" or "timeout")
+        return false;
+      return null;
+    }
+
+    private static string FormatCompactText(JToken token, int maxLength = 200)
+    {
+      if (token == null)
+        return string.Empty;
+
+      string text = token.Type switch
+      {
+        JTokenType.String => token.ToString(),
+        JTokenType.Integer or JTokenType.Float or JTokenType.Boolean => token.ToString(),
+        _ => token.ToString(Formatting.None)
+      };
+
+      if (string.IsNullOrWhiteSpace(text))
+        return string.Empty;
+
+      text = Regex.Replace(text, "\\s+", " ").Trim();
+      if (text.Length > maxLength)
+        text = text.Substring(0, maxLength) + "...";
+      return text;
     }
 
     private static string ExtractFinalText(EventMsg evt)
@@ -5592,6 +7054,22 @@ namespace CodexVS22
         var pane = await DiagnosticsPane.GetAsync();
         var timestamp = DateTime.Now.ToString("HH:mm:ss");
         await pane.WriteLineAsync($"[assistant] {timestamp} {text}");
+      }
+      catch
+      {
+        // best effort logging
+      }
+    }
+
+    private static async Task LogTelemetryAsync(string eventName, Dictionary<string, object> properties = null)
+    {
+      try
+      {
+        var pane = await DiagnosticsPane.GetAsync();
+        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+        var props = properties != null ? string.Join(", ", properties.Select(kvp => $"{kvp.Key}={kvp.Value}")) : "";
+        var message = string.IsNullOrEmpty(props) ? eventName : $"{eventName} ({props})";
+        await pane.WriteLineAsync($"[telemetry] {timestamp} {message}");
       }
       catch
       {
