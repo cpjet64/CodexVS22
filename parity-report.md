@@ -36,3 +36,7 @@ Test evidence
 Windows dependencies (UI parity work)
 - Visual Studio 2022, Extensibility workload; MSBuild; VS experimental instance (/rootsuffix Exp).
 - VS Text and Diff services (IVsDifferenceService, ITextBuffer, ITextEdit), EnvDTE COM automation.
+Release & Marketplace
+- Manifest polished: tags, categories, icon, license. See `source.extension.vsixmanifest`.
+- CI publish workflow: drafts GitHub release, optional marketplace publish with secrets.
+- Artifact retention policy: main=90d, release/*=180d, feature/*=14d (see docs/ARTIFACT_RETENTION.md).
