@@ -130,7 +130,7 @@ Execution Order
 - [x] [T7.9] Persist console visibility and last height across sessions.
 - [x] [T7.10] Unit tests with canned exec event streams and edge cases.
 - [x] [T7.11] Telemetry: number of execs, average runtime, non-zero exits.
-- [ ] [T7.12] Post-test: long outputs and rapid updates remain responsive.
+- [x] [T7.12] Post-test: long outputs and rapid updates remain responsive.
 
 ## T8. MCP tools and prompts
 - [x] [T8.1] Send ListMcpTools and render tools with name and description.
