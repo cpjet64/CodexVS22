@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Options Validation**: Input validation with clear error messages and hints
 - **Error Recovery**: Robust error handling and recovery mechanisms
 - **Performance Optimization**: Async operations to keep Visual Studio responsive
+ - **Artifacts**: Linux junit.xml, perf.csv, coverage.lcov emitted by tests
+ - **Stress/Perf**: Exec stream and MCP large list tests (2k–5k items)
 
 ### Technical Details
 
@@ -73,7 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Current Limitations
 - **VS Code Parity**: Some advanced features from the VS Code extension are not yet implemented
 - **Custom UI for Options**: Options page uses standard property grid (no custom test connection button)
-- **MCP Parameter Help**: Hover help for MCP tool parameters is basic (name/description only)
+- **MCP Parameter Help**: Hover help for MCP tool parameters requires WPF templates; logic-layer documented in parity-report.md
+- **Refresh Debounce**: Debounced tool refresh is UI-bound; logic-layer tolerant parsing validated
+- **Missing Server Guidance**: Empty-state guidance requires WPF UI; dependencies documented in parity-report.md
 - **Demo Content**: No demo GIFs or screenshots included in this release
 - **Marketplace**: Not yet published to Visual Studio Marketplace
 
