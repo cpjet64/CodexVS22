@@ -40,3 +40,7 @@ Release & Marketplace
 - Manifest polished: tags, categories, icon, license. See `source.extension.vsixmanifest`.
 - CI publish workflow: drafts GitHub release, optional marketplace publish with secrets.
 - Artifact retention policy: main=90d, release/*=180d, feature/*=14d (see docs/ARTIFACT_RETENTION.md).
+Marketplace Validation
+- Manifest fields validated against Marketplace checklist (see docs/MARKETPLACE_CHECKLIST.md).
+- EULA/branding in repo and linked via manifest.
+- Publish workflows: manual (publish.yml) and tag-gated (publish-tag.yml) with optional signing.
