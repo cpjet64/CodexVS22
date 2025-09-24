@@ -16,7 +16,12 @@ Deltas and notes
 - VS-only UI behaviors (WPF, Visual Studio diff services) are not testable on Linux; logic-layer hooks exist but UI parity not asserted here.
 - TurnDiff unified-diff parsing is deferred to VS services; JSON files-array path validated.
 - MCP UI interactions (prompt insert, hover parameter help, refresh debounce, missing-server guidance) require WPF code; logic-layer state persists via options but UI glue not validated here.
-  Dependencies: WPF (XAML), dispatcher, event handlers, VS toolwindow hosting.
+Dependencies: WPF (XAML), dispatcher, event handlers, VS toolwindow hosting.
+
+MCP UI-linked items (documented)
+- T8.6 Missing MCP servers guidance: Requires UI banner/empty-state in the tool window, hyperlink to MCP server configuration docs, and retry affordance. Dependency: WPF visual tree, binding to model state, VS threading (dispatcher).
+- T8.7 Refresh Tools debounce: Requires UI command handler with a debounced async invoker (e.g., 300–500 ms) to avoid spamming the CLI. Dependency: WPF command routing/async patterns. Logic-layer tolerant parsing validated.
+- T8.11 Hover help for tool parameters: Requires tooltip templates bound to tool metadata and parameter schemas from MCP responses. Dependency: WPF DataTemplates/ToolTip, access to MCP schema in the UI layer.
 - Telemetry events are placeholders at logic-level; no external emission on Linux.
 
 Test evidence
