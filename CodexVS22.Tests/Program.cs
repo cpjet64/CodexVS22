@@ -506,7 +506,7 @@ internal static class Program
     AssertTrue(green.Level == CodexVS22.Core.HealthLevel.Green, "Green expected");
     var yellow = CodexVS22.Core.HealthMetrics.Compute(5, 1, 1, 60);
     AssertTrue(yellow.Level == CodexVS22.Core.HealthLevel.Yellow, "Yellow expected");
-    var red = CodexVS22.Core.HealthMetrics.Compute(1, 3, 6, 5);
+    var red = CodexVS22.Core.HealthMetrics.Compute(1, 3, 4, 120);
     AssertTrue(red.Level == CodexVS22.Core.HealthLevel.Red, "Red expected");
   }
 

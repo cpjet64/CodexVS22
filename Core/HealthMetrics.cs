@@ -24,14 +24,14 @@ namespace CodexVS22.Core
   {
     public static HealthStatus Compute(double uptimeMinutes, int reconnects, int errors, int ratePerSec)
     {
-      // Simple thresholds for status bar indicator at logic-layer.
-      // Red: frequent reconnects or high error rate.
-      // Yellow: moderate reconnects or sustained high output rate.
-      // Green: otherwise.
+      // Refined thresholds (UX-oriented):
+      // - Red: reconnects >= 3 OR errors >= 4 OR rate >= 120 lines/sec
+      // - Yellow: reconnects in [1..2] OR errors in [2..3] OR rate in [60..119]
+      // - Green: otherwise
       HealthLevel level;
-      if (reconnects >= 2 || errors >= 5)
+      if (reconnects >= 3 || errors >= 4 || ratePerSec >= 120)
         level = HealthLevel.Red;
-      else if (reconnects == 1 || errors >= 2 || ratePerSec >= 50)
+      else if ((reconnects >= 1 && reconnects <= 2) || (errors >= 2 && errors <= 3) || (ratePerSec >= 60))
         level = HealthLevel.Yellow;
       else
         level = HealthLevel.Green;
@@ -40,4 +40,3 @@ namespace CodexVS22.Core
     }
   }
 }
-
