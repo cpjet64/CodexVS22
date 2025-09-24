@@ -1,0 +1,78 @@
+name: Publish on Tag
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release
+        run: msbuild CodexVS22.sln /t:Rebuild /p:Configuration=Release /m
+
+      - name: Find VSIX
+        id: find
+        shell: powershell
+        run: |
+          $vsix = Get-ChildItem -Recurse -Filter *.vsix | Select-Object -First 1
+          if (-not $vsix) { Write-Error "VSIX not found"; exit 1 }
+          echo "path=$($vsix.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "## \[$tag\]" -SimpleMatch).LineNumber
+          if (-not $start) { $start = ($lines | Select-String -Pattern "### v$tag" -SimpleMatch).LineNumber }
+          if (-not $start) { $body = "Release $tag" } else {
+            $end = ($lines | Select-String -Pattern '^## \[' -SimpleMatch | Where-Object { $_.LineNumber -gt $start } | Select-Object -First 1).LineNumber
+            if (-not $end) { $end = $lines.Count }
+            $body = ($lines[$start-1..$end-2] -join "`n")
+          }
+          $body = $body -replace '"','\"'
+          echo "body=$body" >> $env:GITHUB_OUTPUT
+
+      - name: Sign VSIX (optional)
+        if: env.CODESIGN_B64 && env.CODESIGN_PASS
+        shell: powershell
+        env:
+          CODESIGN_B64: ${{ secrets.CODESIGN_B64 }}
+          CODESIGN_PASS: ${{ secrets.CODESIGN_PASS }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP\\codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_B64))
+          & signtool sign /f $pfx /p $env:CODESIGN_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "${{ steps.find.outputs.path }}"
+
+      - name: Create GitHub Release from tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Codex VS22 ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            ${{ steps.find.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to VS Marketplace (optional)
+        if: env.VSIX_PUBLISHER && env.VSIX_TOKEN
+        shell: powershell
+        env:
+          VSIX_PUBLISHER: ${{ secrets.VSIX_PUBLISHER }}
+          VSIX_TOKEN: ${{ secrets.VSIX_TOKEN }}
+        run: |
+          dotnet tool install --global vsixpublisher --version 1.0.9
+          $env:Path += ";$env:USERPROFILE\.dotnet\tools"
+          vsixpublisher publish -payload "${{ steps.find.outputs.path }}" -publisher "$env:VSIX_PUBLISHER" -personalAccessToken "$env:VSIX_TOKEN"
+
