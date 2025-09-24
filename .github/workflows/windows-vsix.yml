@@ -1,0 +1,65 @@
+name: Windows VSIX CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet
+        run: nuget restore CodexVS22.sln
+
+      - name: Build Release
+        run: msbuild CodexVS22.sln /t:Rebuild /p:Configuration=Release /m
+
+      - name: Run vstest (unit)
+        shell: powershell
+        run: |
+          if (Test-Path "CodexVS22.Tests\\bin\\Release\\net8.0\\CodexVS22.Tests.exe") {
+            & "CodexVS22.Tests\\bin\\Release\\net8.0\\CodexVS22.Tests.exe"
+          } else {
+            Write-Host "No Windows-native tests. Skipping."
+          }
+
+      - name: Package VSIX
+        shell: powershell
+        run: |
+          $vsix = Get-ChildItem -Recurse -Filter *.vsix | Select-Object -First 1
+          if (-not $vsix) { Write-Error "VSIX not found"; exit 1 }
+          Write-Host "VSIX=$($vsix.FullName)"
+          echo "VSIX_PATH=$($vsix.FullName)" >> $env:GITHUB_ENV
+
+      - name: Smoke test (/rootsuffix Exp)
+        shell: powershell
+        run: |
+          $devenv = (Get-ChildItem "C:\\Program Files\\Microsoft Visual Studio" -Recurse -Filter devenv.exe | Select-Object -First 1).FullName
+          if (-not $devenv) { Write-Error "devenv.exe not found"; exit 1 }
+          Start-Process -FilePath $devenv -ArgumentList "/rootsuffix Exp" -NoNewWindow -PassThru | Out-Null
+          Start-Sleep -Seconds 10
+          Get-Process devenv | Stop-Process -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: |
+            **/*.vsix
+            **/build-log.txt
+            **/Release/**
+
+  sign:
+    if: false
+    runs-on: windows-latest
+    steps:
+      - name: Placeholder for code signing
+        run: echo "Signing disabled in stub; integrate later."
+
