@@ -1,10 +1,10 @@
-<testsuite name="CodexVS22.Tests" tests="33" failures="0" time="0.139">
-  <testcase name="AgentMessageEvents_CorrelateDeltaAndFinal" time="0.015"></testcase>
+<testsuite name="CodexVS22.Tests" tests="33" failures="0" time="0.161">
+  <testcase name="AgentMessageEvents_CorrelateDeltaAndFinal" time="0.017"></testcase>
   <testcase name="ParallelTurns_CorrelateIndependently" time="0.000"></testcase>
   <testcase name="ParallelTurns_TaskCompleteCleansState" time="0.000"></testcase>
-  <testcase name="UserInputSubmission_LongInput_RoundTrips" time="0.013"></testcase>
+  <testcase name="UserInputSubmission_LongInput_RoundTrips" time="0.014"></testcase>
   <testcase name="UserInputSubmission_NonAscii_RoundTrips" time="0.000"></testcase>
-  <testcase name="UserInputSubmission_PasteFlowPreservesLines" time="0.000"></testcase>
+  <testcase name="UserInputSubmission_PasteFlowPreservesLines" time="0.001"></testcase>
   <testcase name="NormalizeAssistantText_NormalizesSmartQuotes" time="0.012"></testcase>
   <testcase name="ExecApprovalSubmission_MatchesRequest" time="0.001"></testcase>
   <testcase name="PatchApprovalSubmission_MatchesRequest" time="0.000"></testcase>
@@ -12,16 +12,16 @@
   <testcase name="RememberedPatchApprovals_AreHonored" time="0.000"></testcase>
   <testcase name="DiffParsing_WithFilesArray_ParsesDocuments" time="0.001"></testcase>
   <testcase name="DiffParsing_MarksBinaryAndEmpty" time="0.000"></testcase>
-  <testcase name="PatchApply_WithMatchingOriginal_WritesFile" time="0.002"></testcase>
+  <testcase name="PatchApply_WithMatchingOriginal_WritesFile" time="0.003"></testcase>
   <testcase name="PatchApply_WithMismatchedOriginal_ReportsConflict" time="0.000"></testcase>
-  <testcase name="PatchApply_RespectsReadOnlyFiles" time="0.000"></testcase>
+  <testcase name="PatchApply_RespectsReadOnlyFiles" time="0.001"></testcase>
   <testcase name="ExecTranscriptTracker_HandlesAnsiAndTrim" time="0.002"></testcase>
   <testcase name="ExecTranscriptTracker_CancelClearsState" time="0.000"></testcase>
   <testcase name="ExecConsole_LongRapidStream_Responsive" time="0.001"></testcase>
-  <testcase name="Mcp_LastUsed_RoundTrip_Persists" time="0.064"></testcase>
+  <testcase name="Mcp_LastUsed_RoundTrip_Persists" time="0.081"></testcase>
   <testcase name="Mcp_LargeList_Extraction_Perf" time="0.009"></testcase>
   <testcase name="Mcp_LargeList_NoFreeze" time="0.007"></testcase>
-  <testcase name="Options_Validation_Rules_ClampAndDefaults" time="0.006"></testcase>
+  <testcase name="Options_Validation_Rules_ClampAndDefaults" time="0.008"></testcase>
   <testcase name="Options_Precendence_SolutionOverrides" time="0.000"></testcase>
   <testcase name="HealthMetrics_Thresholds_ComputeLevels" time="0.000"></testcase>
   <testcase name="StatusBarHealthModel_MapsToLabels" time="0.000"></testcase>
