@@ -42,24 +42,14 @@ This extension integrates with the Codex CLI to provide intelligent code suggest
 3. **Configure Settings**: Go to **Tools → Options → Codex** to configure CLI path and other settings
 4. **Authenticate**: Click the Login button in the tool window to authenticate with Codex
 
-## 📹 Demo Videos
+## 📹 Demo GIFs
 
-*Demo videos will be added here to showcase the extension's capabilities.*
+Placeholders shown; capture per docs/DEMO_GIFS.md on Windows:
 
-### Quick Start Demo
-*[Installation and basic setup demo - Coming Soon]*
-
-### Code Context Integration
-*[Right-click code integration demo - Coming Soon]*
-
-### MCP Tools in Action
-*[MCP tools integration demo - Coming Soon]*
-
-### Custom Prompts
-*[Custom prompts usage demo - Coming Soon]*
-
-### Diff and Patch Workflow
-*[Code diff and patch approval demo - Coming Soon]*
+![Chat](docs/gifs/chat.gif)
+![Exec](docs/gifs/exec.gif)
+![Diff](docs/gifs/diff.gif)
+![MCP](docs/gifs/mcp.gif)
 
 ## 📸 Screenshots
 
@@ -105,9 +95,9 @@ The tool window shows a login banner if `codex login status` reports you are log
 - Press **F5** from Visual Studio to build and run the extension
 - Check the **Codex Diagnostics** window for detailed logs and error information
 
-## 📝 License
+## 📝 License / EULA
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+See EULA.md for license terms.
 
 ## 🤝 Contributing
 
