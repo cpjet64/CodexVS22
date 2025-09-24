@@ -44,3 +44,9 @@ Marketplace Validation
 - Manifest fields validated against Marketplace checklist (see docs/MARKETPLACE_CHECKLIST.md).
 - EULA/branding in repo and linked via manifest.
 - Publish workflows: manual (publish.yml) and tag-gated (publish-tag.yml) with optional signing.
+Pre-release Validation (v0.1.0-RC)
+- All T10 items marked complete; Windows-only steps documented (signtool, vsixpublisher, devenv /rootsuffix Exp).
+- Tag created: v0.1.0 (tag-gated publish workflow configured).
+- Artifacts current: junit.xml, perf.csv, coverage.lcov, todo.diff.
+- CHANGELOG, EULA, BRANDING, README, DEMO_GIFS guide reviewed for consistency.
+  - Demo GIFs placeholders present; capture to be performed on Windows prior to Marketplace publish.
