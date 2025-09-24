@@ -58,15 +58,38 @@ jobs:
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_B64))
           & signtool sign /f $pfx /p $env:CODESIGN_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $env:VSIX_PATH
 
-      - name: Upload artifact
+      - name: Upload artifact (main)
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: vsix
+          name: vsix-main
           path: |
             **/*.vsix
             **/build-log.txt
             **/Release/**
-          retention-days: 30
+          retention-days: 90
+
+      - name: Upload artifact (release/*)
+        if: startsWith(github.ref, 'refs/heads/release/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-release
+          path: |
+            **/*.vsix
+            **/build-log.txt
+            **/Release/**
+          retention-days: 180
+
+      - name: Upload artifact (feature/*)
+        if: startsWith(github.ref, 'refs/heads/feature/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-feature
+          path: |
+            **/*.vsix
+            **/build-log.txt
+            **/Release/**
+          retention-days: 14
 
   sign:
     if: false

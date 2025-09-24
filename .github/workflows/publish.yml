@@ -1,0 +1,69 @@
+name: Publish VSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: 'Promote draft to release (yes/no)'
+        required: true
+        default: 'no'
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release
+        run: msbuild CodexVS22.sln /t:Rebuild /p:Configuration=Release /m
+
+      - name: Find VSIX
+        shell: powershell
+        id: find
+        run: |
+          $vsix = Get-ChildItem -Recurse -Filter *.vsix | Select-Object -First 1
+          if (-not $vsix) { Write-Error "VSIX not found"; exit 1 }
+          echo "path=$($vsix.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Sign VSIX (optional)
+        if: env.CODESIGN_B64 && env.CODESIGN_PASS
+        shell: powershell
+        env:
+          CODESIGN_B64: ${{ secrets.CODESIGN_B64 }}
+          CODESIGN_PASS: ${{ secrets.CODESIGN_PASS }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP\\codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_B64))
+          & signtool sign /f $pfx /p $env:CODESIGN_PASS /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "${{ steps.find.outputs.path }}"
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            ${{ steps.find.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote release (optional)
+        if: inputs.promote == 'yes'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to VS Marketplace (optional)
+        if: env.VSIX_PUBLISHER && env.VSIX_TOKEN
+        shell: powershell
+        env:
+          VSIX_PUBLISHER: ${{ secrets.VSIX_PUBLISHER }}
+          VSIX_TOKEN: ${{ secrets.VSIX_TOKEN }}
+        run: |
+          dotnet tool install --global vsixpublisher --version 1.0.9
+          $env:Path += ";$env:USERPROFILE\.dotnet\tools"
+          vsixpublisher publish -payload "${{ steps.find.outputs.path }}" -publisher "$env:VSIX_PUBLISHER" -personalAccessToken "$env:VSIX_TOKEN"
+

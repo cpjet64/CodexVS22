@@ -6,8 +6,9 @@
     <Description>AI-powered coding assistant for Visual Studio 2022. Integrates with Codex CLI to provide intelligent code suggestions, chat, diff/exec/approvals, and MCP tool support.</Description>
     <Icon>Resources\Icon.png</Icon>
     <PreviewImage>Resources\Icon.png</PreviewImage>
-    <Tags>AI, Codex, Coding Assistant, Visual Studio, VS2022, Code Generation, Chat, MCP, Tools</Tags>
-    <Categories>Other</Categories>
+    <Tags>AI;Codex;Coding Assistant;Visual Studio;VS2022;Code Generation;Chat;MCP;Tools;OpenAI;Productivity</Tags>
+    <Categories>Coding;Productivity</Categories>
+    <License>EULA.md</License>
     <MoreInfoUrl>https://github.com/curtp/codex-vs22</MoreInfoUrl>
     <GettingStartedGuide>https://github.com/curtp/codex-vs22/blob/main/README.md</GettingStartedGuide>
     <ReleaseNotes>Initial release with chat, diff/exec/approvals, MCP tools, and custom prompts support.</ReleaseNotes>

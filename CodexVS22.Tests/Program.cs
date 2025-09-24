@@ -516,10 +516,13 @@ internal static class Program
     var m = new CodexVS22.Core.StatusBarHealthModel();
     m.Update(10, 0, 0, 10);
     AssertEqual("Healthy", m.Label, "Green→Healthy");
+    AssertEqual("OK", m.Beacon, "Green→OK");
     m.Update(5, 1, 0, 80);
     AssertEqual("Degraded", m.Label, "Yellow→Degraded");
+    AssertTrue(m.Beacon.StartsWith("WARN"), "Yellow→WARN beacon");
     m.Update(1, 3, 5, 200);
     AssertEqual("Unstable", m.Label, "Red→Unstable");
+    AssertTrue(m.Beacon.StartsWith("ERR"), "Red→ERR beacon");
   }
 
   private static void ExtractMcpTools_ParsesValidResponse()
