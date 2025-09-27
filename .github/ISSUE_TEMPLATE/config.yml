@@ -1,0 +1,5 @@
+﻿blank_issues_enabled: false
+contact_links:
+  - name: Release status tracker
+    url: https://github.com/cpjet64/CodexVS22/blob/main/todo-release.md
+    about: Review current release tasks before filing new work.

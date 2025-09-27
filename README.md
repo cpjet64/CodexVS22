@@ -1,129 +1,69 @@
-# Codex for Visual Studio 2022
+﻿# Codex for Visual Studio 2022
 
-**AI-powered coding assistant for Visual Studio 2022**
+Codex for Visual Studio 2022 brings the Codex CLI into Microsoft Visual Studio so that you can chat with the Codex agent, run guided commands, review diffs, and interact with MCP tools without leaving the editor.
 
-This extension integrates with the Codex CLI to provide intelligent code suggestions, chat functionality, diff/exec/approvals, and MCP (Model Context Protocol) tool support directly within Visual Studio 2022.
+> **Unofficial project**: CodexVS22 is community maintained and is not an official product of Anthropic or Microsoft. The extension is under active development and APIs may change.
 
-## ⚠️ Important Disclaimers
+## Project Status
+- Actively developed with frequent in-progress checkpoints.
+- Requires the Codex CLI to be installed locally.
+- Expect rough edges while release tasks in `todo-release.md` remain open.
 
-- **Unofficial Extension**: This is an unofficial extension and is not affiliated with or endorsed by Anthropic or Microsoft.
-- **Third-Party Dependencies**: Requires the Codex CLI to be installed and properly configured.
-- **Beta Software**: This extension is in active development and may contain bugs or incomplete features.
-- **Use at Your Own Risk**: The authors are not responsible for any issues, data loss, or problems that may arise from using this extension.
+## Features
+- AI chat tool window with full conversation history and code selection context.
+- Diff review and patch application workflow with approval gates.
+- Execution console for running shell commands through Codex with optional WSL routing.
+- MCP (Model Context Protocol) tool discovery, invocation, and prompt insertion helpers.
+- Persistent solution scoped settings plus import/export for sharing configurations.
+- Telemetry hooks (opt in) for tracking prompt and tool usage.
 
-## 🚀 Features
+## Requirements
+- Visual Studio 2022 version 17.6 or newer with the **Visual Studio extension development** workload.
+- Codex CLI installed and available on `PATH`, or configure the absolute path in the Options page.
+- Optional: Windows Subsystem for Linux if you prefer to run the CLI inside WSL.
 
-- **AI Chat Interface**: Interactive chat with Codex AI directly in Visual Studio
-- **Code Context Integration**: Right-click to add selected code to chat
-- **Diff and Patch Support**: View and apply code changes with approval workflows
-- **Command Execution**: Run commands with AI assistance and approval
-- **MCP Tools**: Integration with Model Context Protocol tools and servers
-- **Custom Prompts**: Predefined prompts for common coding tasks
-- **WSL Support**: Run Codex CLI through Windows Subsystem for Linux
-- **Persistent Settings**: User preferences and solution-specific overrides
+## Installation
+1. Download the latest `.vsix` package from the [releases](../../releases) page.
+2. Double-click the package to launch the Visual Studio extension installer.
+3. Restart Visual Studio after the installer completes.
+4. Open the Codex tool window via `Tools -> Open Codex`.
 
-## 📋 Prerequisites
+## Getting Started
+1. Authenticate: use the **Login** button in the Codex tool window (runs `codex login`).
+2. Send context: right-click a selection and choose **Add to Codex chat** to preload snippets.
+3. Adjust settings: visit `Tools -> Options -> Codex` for CLI path, approval modes, sandbox policy, and default models.
+4. Try prompts: insert predefined prompts from the prompt palette or create your own.
 
-- **Visual Studio 2022** (17.x) with "Visual Studio extension development" workload
-- **Codex CLI** installed and on PATH, or provide an explicit path in Options
-- **Optional**: WSL installed if you choose to run Codex via WSL
+## Configuration Notes
+- Settings support per-solution overrides stored alongside the `.sln` file.
+- WSL integration shells out to `wsl.exe -- codex ...` when enabled.
+- MCP servers are declared in `codex.json`; use the tool window refresh action after editing the file.
+- Execution safeguards route through approval workflows; see `PROMPTS.txt` for built-in command templates.
 
-## 🛠️ Installation
+## Building From Source
+```powershell
+# Restore dependencies
+msbuild CodexVS22.sln /t:Restore
 
-1. Download the latest `.vsix` file from the [Releases](../../releases) page
-2. Double-click the `.vsix` file to install the extension
-3. Restart Visual Studio 2022
-4. Open the Codex tool window via **Tools → Open Codex**
+# Build the VSIX (Release configuration recommended)
+msbuild CodexVS22.sln /p:Configuration=Release
+```
+Generated artifacts land in `bin/` and can be installed by double-clicking the resulting `.vsix`.
 
-## 🚀 Getting Started
+## Testing
+- Unit tests reside in `CodexVS22.Tests` and can be executed with `dotnet test`.
+- Integration validation relies on manual smoke tests noted in `RELEASE_CHECKLIST_v0.1.0.md` and `POST_TEST_SUMMARY_v0.1.0.md`.
 
-1. **Open Codex**: Go to **Tools → Open Codex** to show the tool window
-2. **Add Code to Chat**: Select code in the editor, right-click, and choose **"Add to Codex chat"**
-3. **Configure Settings**: Go to **Tools → Options → Codex** to configure CLI path and other settings
-4. **Authenticate**: Click the Login button in the tool window to authenticate with Codex
+## Contributing
+Contributions are welcome. Please:
+1. Open an issue to discuss significant feature ideas.
+2. Follow the provided issue templates for bug reports and feature requests.
+3. Submit pull requests using the template to document testing and rationale.
 
-## 📹 Demo GIFs
+## Support and Feedback
+- File issues on the [GitHub tracker](../../issues).
+- Check the `/docs` directory for build logs, release notes, and troubleshooting guides.
+- Discussions and Q&A can happen via GitHub Discussions (if enabled) or by opening an issue.
 
-Placeholders shown; capture per docs/DEMO_GIFS.md on Windows:
-
-![Chat](docs/gifs/chat.gif)
-![Exec](docs/gifs/exec.gif)
-![Diff](docs/gifs/diff.gif)
-![MCP](docs/gifs/mcp.gif)
-
-## 📸 Screenshots
-
-*Screenshots will be added here to show the extension's interface.*
-
-### Main Interface
-*[Main tool window screenshot - Coming Soon]*
-
-### Options Configuration
-*[Options page screenshot - Coming Soon]*
-
-### Diff Viewer
-*[Diff viewer screenshot - Coming Soon]*
-
-### Exec Console
-*[Command execution console screenshot - Coming Soon]*
-
-## ⚙️ Configuration
-
-### Options (Tools → Options → Codex)
-
-- **CLI Executable Path**: Full path to `codex` (empty uses PATH)
-- **Use WSL**: Runs `wsl.exe -- codex proto` when enabled
-- **Open on Startup**: Auto-opens Codex tool window when VS loads
-- **Approval Mode**: Chat, Agent, or Agent (Full Access) for exec/patch
-- **Sandbox Policy**: Security policy for code execution (Strict, Moderate, Permissive)
-- **Default Model**: Model identifier for new chats
-- **Default Reasoning**: Reasoning effort level (none, medium, high)
-
-### MCP Configuration
-
-1. Create a `codex.json` file in your project root
-2. Add MCP server configurations
-3. Restart Codex or refresh tools
-
-## 🔐 Authentication
-
-The tool window shows a login banner if `codex login status` reports you are logged out. Click **Login** to run `codex login` (respecting the WSL setting) and restart the background CLI. Use the **Logout** button to invalidate the session when needed.
-
-## 🐛 Debugging
-
-- The project is configured to launch the Experimental instance (`/rootsuffix Exp`)
-- Press **F5** from Visual Studio to build and run the extension
-- Check the **Codex Diagnostics** window for detailed logs and error information
-
-## 📝 License / EULA
-
-See EULA.md for license terms.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](../../issues)
-- **Discussions**: [GitHub Discussions](../../discussions)
-- **Documentation**: [Wiki](../../wiki)
-
-## 🔗 Related Projects
-
-- [Codex CLI](https://github.com/anthropics/codex-cli) - The official Codex command-line interface
-- [Codex VS Code Extension](https://github.com/anthropics/codex-vscode) - Official VS Code extension
-
-## 📊 Version History
-
-### v0.1.0 (Initial Release)
-- AI chat interface with Codex integration
-- Code context integration (right-click to add to chat)
-- Diff and patch support with approval workflows
-- Command execution with AI assistance
-- MCP tools integration
-- Custom prompts support
-- WSL support for CLI execution
-- Persistent settings and solution-specific overrides
-- Comprehensive options and configuration
-- Telemetry and diagnostics support
+## License
+This repository is provided under the MIT License (see `LICENSE`). The VSIX package also includes the project-specific `EULA.md`; consult both documents before redistribution.
