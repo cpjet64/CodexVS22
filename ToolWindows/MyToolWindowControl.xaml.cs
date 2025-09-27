@@ -1,7182 +1,13226 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Automation;
-using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Animation;
-using Community.VisualStudio.Toolkit;
-using EnvDTE;
-using EnvDTE80;
-using CodexVS22.Core;
-using CodexVS22.Core.Protocol;
-// Bring nested DiffUtilities types into scope explicitly.
-using CodexVS22.Core;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Threading;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using System.Text.RegularExpressions;
-using System.Windows.Threading;
-using DteProject = EnvDTE.Project;
-using DteProjects = EnvDTE.Projects;
-using DteProjectItem = EnvDTE.ProjectItem;
-using DteProjectItems = EnvDTE.ProjectItems;
-using DteSolution = EnvDTE.Solution;
-
-namespace CodexVS22
-{
-  public partial class MyToolWindowControl : UserControl
-  {
-    private CodexCliHost _host;
-    private readonly Dictionary<string, AssistantTurn> _assistantTurns = new();
-    private readonly Dictionary<string, ExecTurn> _execTurns = new();
-    private readonly List<ExecTurn> _execConsoleTurns = new();
-    private readonly ObservableCollection<McpToolInfo> _mcpTools = new();
-    private readonly ObservableCollection<McpToolRun> _mcpToolRuns = new();
-    private readonly ObservableCollection<CustomPromptInfo> _customPrompts = new();
-    private readonly Dictionary<string, string> _execCommandIndex = new();
-    private readonly Dictionary<string, string> _execIdRemap = new();
-    private readonly Dictionary<string, bool> _rememberedExecApprovals = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, bool> _rememberedPatchApprovals = new(StringComparer.Ordinal);
-    private readonly Queue<ApprovalRequest> _approvalQueue = new();
-    private ApprovalRequest _activeApproval;
-    private string _lastUserInput;
-    private CodexOptions _options;
-    private string _workingDir;
-    private bool _authKnown;
-    private bool _isAuthenticated;
-    private bool _authOperationInProgress;
-    private string _authMessage = string.Empty;
-    private bool _authGatedSend;
-    private string _lastExecFallbackId;
-    private double _execConsolePreferredHeight = 180.0;
-    private bool _suppressExecToggleEvent;
-    private IVsSolution _solutionService;
-    private SolutionEventsSink _solutionEvents;
-    private uint _solutionEventsCookie;
-    private bool _cliStarted;
-    private readonly SemaphoreSlim _workingDirLock = new(1, 1);
-    private static readonly string ExtensionRoot = NormalizeDirectory(AppContext.BaseDirectory);
-    private UIContext _solutionLoadedContext;
-    private UIContext _folderOpenContext;
-    private bool _waitingForSolutionLoad;
-    private string _lastKnownSolutionRoot = string.Empty;
-    private string _lastKnownWorkspaceRoot = string.Empty;
-    private static readonly TaskCompletionSource<EnvironmentSnapshot> _environmentReadySource = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Dictionary<string, McpToolRun> _mcpToolRunIndex = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, CustomPromptInfo> _customPromptIndex = new(StringComparer.Ordinal);
-    private const int MaxMcpToolRuns = 20;
-    private static int _environmentReadyInitialized;
-    private DateTime _lastMcpToolsRefresh = DateTime.MinValue;
-    private DateTime _lastPromptsRefresh = DateTime.MinValue;
-    private const int RefreshDebounceSeconds = 2;
-
-    private readonly object _heartbeatLock = new();
-    private Timer _heartbeatTimer;
-    private HeartbeatState _heartbeatState;
-    private int _heartbeatSending;
-    private bool _initializingSelectors;
-    private string _selectedModel = DefaultModelName;
-    private string _selectedReasoning = DefaultReasoningValue;
-    private CodexOptions.ApprovalMode _selectedApprovalMode = CodexOptions.ApprovalMode.Chat;
-    private System.Windows.Window _hostWindow;
-    private bool _windowEventsHooked;
-    private ObservableCollection<DiffTreeItem> _diffTreeRoots = new();
-    private Dictionary<string, DiffDocument> _diffDocuments = new(StringComparer.OrdinalIgnoreCase);
-    private bool _suppressDiffSelectionUpdate;
-    private int _diffTotalLeafCount;
-    private bool _patchApplyInProgress;
-    private DateTime? _patchApplyStartedAt;
-    private int _patchApplyExpectedFiles;
-    private string _lastPatchCallId = string.Empty;
-    private string _lastPatchSignature = string.Empty;
-    private sealed class AssistantTurn
-    {
-      public AssistantTurn(ChatBubbleElements elements)
-      {
-        Container = elements.Container;
-        Header = elements.Header;
-        Bubble = elements.Body;
-      }
-
-      public Border Container { get; }
-      public TextBlock Header { get; }
-      public TextBlock Bubble { get; }
-      public StringBuilder Buffer { get; } = new StringBuilder();
-    }
-
-    private sealed class ChatBubbleElements
-    {
-      public ChatBubbleElements(Border container, TextBlock header, TextBlock body)
-      {
-        Container = container;
-        Header = header;
-        Body = body;
-      }
-
-      public Border Container { get; }
-      public TextBlock Header { get; }
-      public TextBlock Body { get; }
-    }
-
-    private enum ApprovalKind
-    {
-      Exec,
-      Patch
-    }
-
-    private sealed class ApprovalRequest
-    {
-      public ApprovalRequest(ApprovalKind kind, string callId, string message, string signature, bool canRemember)
-      {
-        Kind = kind;
-        CallId = callId;
-        Message = message;
-        Signature = signature;
-        CanRemember = canRemember;
-      }
-
-      public ApprovalKind Kind { get; }
-      public string CallId { get; }
-      public string Message { get; }
-      public string Signature { get; }
-      public bool CanRemember { get; }
-    }
-
-    private sealed class ExecTurn
-    {
-      public ExecTurn(Border container, TextBlock body, TextBlock header, Button cancelButton, Button copyButton, Button clearButton, Button exportButton, string normalizedCommand)
-      {
-        Container = container;
-        Body = body;
-        Header = header;
-        CancelButton = cancelButton;
-        CopyButton = copyButton;
-        ClearButton = clearButton;
-        ExportButton = exportButton;
-        NormalizedCommand = normalizedCommand;
-        DefaultForeground = body?.Foreground;
-      }
-
-      public Border Container { get; }
-      public TextBlock Body { get; }
-      public TextBlock Header { get; }
-      public Button CancelButton { get; }
-      public Button CopyButton { get; }
-      public Button ClearButton { get; }
-      public Button ExportButton { get; }
-      public Brush DefaultForeground { get; }
-      public string ExecId { get; set; } = string.Empty;
-      public bool CancelRequested { get; set; }
-      public bool IsRunning { get; set; }
-      public string NormalizedCommand { get; set; }
-      public StringBuilder Buffer { get; } = new StringBuilder();
-    }
-
-    private sealed class McpToolInfo
-    {
-      public McpToolInfo(string name, string description, string server)
-      {
-        Name = string.IsNullOrWhiteSpace(name) ? "(tool)" : name.Trim();
-        Description = description?.Trim() ?? string.Empty;
-        Server = server?.Trim() ?? string.Empty;
-      }
-
-      public string Name { get; }
-      public string Description { get; }
-      public string Server { get; }
-    }
-
-    private sealed class McpToolRun : INotifyPropertyChanged
-    {
-      private readonly StringBuilder _outputBuffer = new();
-      private string _statusDisplay;
-      private string _detail = string.Empty;
-      private string _timingDisplay;
-      private bool _isRunning = true;
-      private DateTimeOffset? _completedUtc;
-
-      public McpToolRun(string callId, string toolName, string server)
-      {
-        CallId = string.IsNullOrEmpty(callId) ? Guid.NewGuid().ToString() : callId;
-        ToolName = string.IsNullOrWhiteSpace(toolName) ? "(tool)" : toolName.Trim();
-        Server = server?.Trim() ?? string.Empty;
-        StartedUtc = DateTimeOffset.UtcNow;
-        _statusDisplay = "Running...";
-        _timingDisplay = $"Started {StartedUtc.ToLocalTime():HH:mm:ss}";
-      }
-
-      public string CallId { get; }
-      public string ToolName { get; }
-      public string Server { get; }
-      public DateTimeOffset StartedUtc { get; }
-
-      public string StatusDisplay
-      {
-        get => _statusDisplay;
-        private set => SetProperty(ref _statusDisplay, value, nameof(StatusDisplay));
-      }
-
-      public string Detail
-      {
-        get => _detail;
-        private set => SetProperty(ref _detail, value, nameof(Detail));
-      }
-
-      public string TimingDisplay
-      {
-        get => _timingDisplay;
-        private set => SetProperty(ref _timingDisplay, value, nameof(TimingDisplay));
-      }
-
-      public bool IsRunning
-      {
-        get => _isRunning;
-        private set => SetProperty(ref _isRunning, value, nameof(IsRunning));
-      }
-
-      public event PropertyChangedEventHandler PropertyChanged;
-
-      public void UpdateRunning(string statusText, string detail)
-      {
-        IsRunning = true;
-        _completedUtc = null;
-        StatusDisplay = string.IsNullOrWhiteSpace(statusText) ? "Running..." : statusText.Trim();
-        TimingDisplay = $"Started {StartedUtc.ToLocalTime():HH:mm:ss}";
-        _outputBuffer.Clear();
-        if (!string.IsNullOrWhiteSpace(detail))
-        {
-          _outputBuffer.Append(detail.Trim());
-          Detail = BuildSummary();
-        }
-        else
-        {
-          Detail = string.Empty;
-        }
-      }
-
-      public void AppendOutput(string text)
-      {
-        if (string.IsNullOrWhiteSpace(text))
-          return;
-
-        if (_outputBuffer.Length > 0)
-          _outputBuffer.AppendLine();
-        _outputBuffer.Append(text.Trim());
-        Detail = BuildSummary();
-      }
-
-      public void Complete(string statusText, bool? success, string detail)
-      {
-        IsRunning = false;
-        _completedUtc = DateTimeOffset.UtcNow;
-
-        var fallback = success.HasValue
-          ? (success.Value ? "Completed" : "Failed")
-          : "Completed";
-
-        StatusDisplay = string.IsNullOrWhiteSpace(statusText)
-          ? fallback
-          : statusText.Trim();
-
-        if (!string.IsNullOrWhiteSpace(detail))
-        {
-          if (_outputBuffer.Length > 0)
-            _outputBuffer.AppendLine();
-          _outputBuffer.Append(detail.Trim());
-        }
-
-        Detail = BuildSummary();
-
-        var duration = _completedUtc.Value - StartedUtc;
-        if (duration < TimeSpan.Zero)
-          duration = TimeSpan.Zero;
-
-        TimingDisplay = duration.TotalSeconds < 1
-          ? $"Finished in {duration.TotalMilliseconds:F0} ms"
-          : $"Finished in {duration.TotalSeconds:F1} s";
-      }
-
-      private string BuildSummary()
-      {
-        var summary = _outputBuffer.ToString().Trim();
-        if (summary.Length > 500)
-          summary = summary.Substring(0, 500) + "...";
-        return summary;
-      }
-
-      private void SetProperty<T>(ref T field, T value, string propertyName)
-      {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-          return;
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-      }
-    }
-
-    private sealed class CustomPromptInfo
-    {
-      public CustomPromptInfo(string id, string name, string description, string body, string source)
-      {
-        Id = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString() : id.Trim();
-        Name = string.IsNullOrWhiteSpace(name) ? "(prompt)" : name.Trim();
-        Description = description?.Trim() ?? string.Empty;
-        Body = body ?? string.Empty;
-        Source = source?.Trim() ?? string.Empty;
-      }
-
-      public string Id { get; }
-      public string Name { get; }
-      public string Description { get; }
-      public string Body { get; }
-      public string Source { get; }
-
-      public string SourceDisplay => string.IsNullOrEmpty(Source) ? string.Empty : Source;
-    }
-
-    private readonly struct CandidateSeed
-    {
-      public CandidateSeed(string source, string path, bool isWorkspaceRoot)
-      {
-        Source = source;
-        Path = path;
-        IsWorkspaceRoot = isWorkspaceRoot;
-      }
-
-      public string Source { get; }
-      public string Path { get; }
-      public bool IsWorkspaceRoot { get; }
-    }
-
-    private sealed class WorkingDirectoryCandidate
-    {
-      public WorkingDirectoryCandidate(string source, string path, bool exists, bool hasSolution, bool hasProject, int depth, bool isWorkspaceRoot)
-      {
-        Source = source;
-        Path = path;
-        Exists = exists;
-        HasSolution = hasSolution;
-        HasProject = hasProject;
-        Depth = depth;
-        IsWorkspaceRoot = isWorkspaceRoot;
-        IsInsideExtension = IsInsideExtensionRoot(path);
-      }
-
-      public string Source { get; }
-      public string Path { get; }
-      public bool Exists { get; }
-      public bool HasSolution { get; }
-      public bool HasProject { get; }
-      public int Depth { get; }
-      public bool IsWorkspaceRoot { get; }
-      public bool IsInsideExtension { get; }
-    }
-
-    private sealed class WorkingDirectoryResolution
-    {
-      public WorkingDirectoryResolution(WorkingDirectoryCandidate selected, List<WorkingDirectoryCandidate> candidates)
-      {
-        Selected = selected;
-        Candidates = candidates ?? new List<WorkingDirectoryCandidate>();
-      }
-
-      public WorkingDirectoryCandidate Selected { get; }
-      public List<WorkingDirectoryCandidate> Candidates { get; }
-    }
-
-    private sealed class HeartbeatState
-    {
-      public HeartbeatState(TimeSpan interval, JObject opTemplate, string opType)
-      {
-        Interval = interval;
-        OpTemplate = opTemplate;
-        OpType = opType;
-      }
-
-      public TimeSpan Interval { get; }
-      public JObject OpTemplate { get; }
-      public string OpType { get; }
-    }
-
-    private static readonly string[] ModelOptions = new[]
-    {
-      "gpt-4.1",
-      "gpt-4.1-mini",
-      "o1-mini"
-    };
-
-    private static readonly string[] ReasoningOptions = new[]
-    {
-      "none",
-      "medium",
-      "high"
-    };
-
-    private static readonly CodexOptions.ApprovalMode[] ApprovalModeOptions =
-    {
-      CodexOptions.ApprovalMode.Chat,
-      CodexOptions.ApprovalMode.Agent,
-      CodexOptions.ApprovalMode.AgentFullAccess
-    };
-
-    private const string DefaultModelName = "gpt-4.1";
-    private const string DefaultReasoningValue = "medium";
-
-    private static bool IsInsideExtensionRoot(string path)
-    {
-      var normalized = NormalizeDirectory(path);
-      if (string.IsNullOrEmpty(normalized) || string.IsNullOrEmpty(ExtensionRoot))
-        return false;
-
-      return normalized.StartsWith(ExtensionRoot, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private async Task InitializeSelectorsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      _initializingSelectors = true;
-      try
-      {
-        var approvalBox = this.FindName("ApprovalCombo") as ComboBox;
-        if (approvalBox != null)
-        {
-          approvalBox.SelectionChanged -= OnApprovalModeChanged;
-          var index = Array.IndexOf(ApprovalModeOptions, _selectedApprovalMode);
-          approvalBox.SelectedIndex = index >= 0 ? index : 0;
-          approvalBox.SelectionChanged += OnApprovalModeChanged;
-        }
-
-        var modelBox = this.FindName("ModelCombo") as ComboBox;
-        if (modelBox != null)
-        {
-          modelBox.SelectionChanged -= OnModelSelectionChanged;
-          modelBox.ItemsSource = ModelOptions;
-          _selectedModel = NormalizeModel(_options?.DefaultModel);
-          modelBox.SelectedItem = _selectedModel;
-          modelBox.SelectionChanged += OnModelSelectionChanged;
-        }
-
-        var reasoningBox = this.FindName("ReasoningCombo") as ComboBox;
-        if (reasoningBox != null)
-        {
-          reasoningBox.SelectionChanged -= OnReasoningSelectionChanged;
-          reasoningBox.ItemsSource = ReasoningOptions;
-          _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
-          reasoningBox.SelectedItem = _selectedReasoning;
-          reasoningBox.SelectionChanged += OnReasoningSelectionChanged;
-        }
-      }
-      finally
-      {
-        _initializingSelectors = false;
-      }
-    }
-
-    private async Task RestoreLastUsedItemsAsync()
-    {
-      try
-      {
-        // Restore last used prompt if available
-        if (!string.IsNullOrEmpty(_options?.LastUsedPrompt))
-        {
-          var lastPrompt = _customPrompts.FirstOrDefault(p => p.Id == _options.LastUsedPrompt);
-          if (lastPrompt != null)
-          {
-            // Highlight the last used prompt in the UI
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            // Could add visual indication here if needed
-          }
-        }
-
-        // Restore last used tool if available
-        if (!string.IsNullOrEmpty(_options?.LastUsedTool))
-        {
-          var lastTool = _mcpTools.FirstOrDefault(t => t.Name == _options.LastUsedTool);
-          if (lastTool != null)
-          {
-            // Highlight the last used tool in the UI
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            // Could add visual indication here if needed
-          }
-        }
-      }
-      catch (Exception ex)
-      {
-        // Log error but don't fail initialization
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await LogTelemetryAsync("restore_last_used_failed", new Dictionary<string, object>
-          {
-            ["error"] = ex.Message
-          });
-        });
-      }
-    }
-
-    private static string NormalizeModel(string value)
-    {
-      if (string.IsNullOrWhiteSpace(value))
-        return DefaultModelName;
-
-      foreach (var option in ModelOptions)
-      {
-        if (string.Equals(option, value, StringComparison.OrdinalIgnoreCase))
-          return option;
-      }
-
-      return DefaultModelName;
-    }
-
-    private static string NormalizeReasoning(string value)
-    {
-      if (string.IsNullOrWhiteSpace(value))
-        return DefaultReasoningValue;
-
-      foreach (var option in ReasoningOptions)
-      {
-        if (string.Equals(option, value, StringComparison.OrdinalIgnoreCase))
-          return option;
-      }
-
-      return DefaultReasoningValue;
-    }
-
-    private void OnModelSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-      if (_initializingSelectors)
-        return;
-
-      var selected = (sender as ComboBox)?.SelectedItem as string;
-      var normalized = NormalizeModel(selected ?? string.Empty);
-      if (string.Equals(normalized, _selectedModel, StringComparison.Ordinal))
-        return;
-
-      _selectedModel = normalized;
-      if (_options != null)
-        _options.DefaultModel = normalized;
-      QueueOptionSave();
-    }
-
-    private void OnReasoningSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-      if (_initializingSelectors)
-        return;
-
-      var selected = (sender as ComboBox)?.SelectedItem as string;
-      var normalized = NormalizeReasoning(selected ?? string.Empty);
-      if (string.Equals(normalized, _selectedReasoning, StringComparison.Ordinal))
-        return;
-
-      _selectedReasoning = normalized;
-      if (_options != null)
-        _options.DefaultReasoning = normalized;
-      QueueOptionSave();
-    }
-
-    private void OnApprovalModeChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-      if (_initializingSelectors)
-        return;
-
-      if (sender is not ComboBox combo || combo.SelectedIndex < 0 || combo.SelectedIndex >= ApprovalModeOptions.Length)
-        return;
-
-      var mode = ApprovalModeOptions[combo.SelectedIndex];
-      if (mode == _selectedApprovalMode)
-        return;
-
-      _selectedApprovalMode = mode;
-      if (_options != null)
-        _options.Mode = mode;
-      QueueOptionSave();
-      EnqueueFullAccessBannerRefresh();
-    }
-
-    private static void QueueOptionSave()
-    {
-      var options = CodexVS22Package.OptionsInstance;
-      if (options == null)
-        return;
-
-      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-      {
-        try
-        {
-          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-          options.SaveSettingsToStorage();
-        }
-        catch
-        {
-          // ignore persistence failures; options page will handle fallback
-        }
-      });
-    }
-    public MyToolWindowControl()
-    {
-      InitializeComponent();
-    }
-
-    public static MyToolWindowControl Current { get; private set; }
-
-    internal static void SignalEnvironmentReady(EnvironmentSnapshot snapshot)
-    {
-      if (Interlocked.Exchange(ref _environmentReadyInitialized, 1) == 0)
-        _environmentReadySource.TrySetResult(snapshot);
-      else if (!_environmentReadySource.Task.IsCompleted)
-        _environmentReadySource.TrySetResult(snapshot);
-    }
-
-    internal static Task WaitForUiContextAsync(UIContext context, CancellationToken ct)
-    {
-      if (context == null || context.IsActive)
-        return Task.CompletedTask;
-
-      var tcs = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-      void OnChanged(object sender, UIContextChangedEventArgs args)
-      {
-        if (!args.Activated)
-          return;
-
-        context.UIContextChanged -= OnChanged;
-        tcs.TrySetResult(null);
-      }
-
-      context.UIContextChanged += OnChanged;
-
-      if (ct.CanBeCanceled)
-      {
-        ct.Register(() =>
-        {
-          context.UIContextChanged -= OnChanged;
-          tcs.TrySetCanceled();
-        });
-      }
-
-      return tcs.Task;
-    }
-
-    private static async Task<EnvironmentSnapshot> WaitForEnvironmentReadyAsync()
-    {
-      var readyTask = _environmentReadySource.Task;
-      if (readyTask.IsCompleted)
-        return await readyTask.ConfigureAwait(true);
-
-      var completed = await Task.WhenAny(readyTask, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(true);
-      return completed == readyTask ? await readyTask.ConfigureAwait(true) : EnvironmentSnapshot.Empty;
-    }
-
-    private void OnLoaded(object sender, RoutedEventArgs e)
-    {
-      ThreadHelper.JoinableTaskFactory.Run(async () =>
-      {
-        await OnLoadedAsync(sender, e);
-      });
-    }
-
-    private async Task OnLoadedAsync(object sender, RoutedEventArgs e)
-    {
-      if (_host != null) return;
-      Current = this;
-      _options = CodexVS22Package.OptionsInstance ?? new CodexOptions();
-      _host = CreateHost();
-
-      _selectedModel = NormalizeModel(_options?.DefaultModel);
-      _selectedReasoning = NormalizeReasoning(_options?.DefaultReasoning);
-      _selectedApprovalMode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
-      _execConsolePreferredHeight = Math.Max(80, _options?.ExecConsoleHeight ?? 180.0);
-      ApplyExecConsoleToggleState();
-      if (_options != null)
-      {
-        _options.DefaultModel = _selectedModel;
-        _options.DefaultReasoning = _selectedReasoning;
-        _options.Mode = _selectedApprovalMode;
-      }
-
-      await InitializeSelectorsAsync();
-      await UpdateFullAccessBannerAsync();
-      ApplyWindowPreferences();
-      InitializeMcpToolsUi();
-      
-      // Restore last used tool and prompt
-      await RestoreLastUsedItemsAsync();
-
-      await AdviseSolutionEventsAsync();
-
-      await UpdateAuthenticationStateAsync(false, false, "Checking Codex authentication...", true);
-
-      var environmentSnapshot = await WaitForEnvironmentReadyAsync();
-      ApplyEnvironmentSnapshot(environmentSnapshot);
-
-      _workingDir = await DetermineInitialWorkingDirectoryAsync();
-
-      var started = await _host.StartAsync(_options, _workingDir);
-      _cliStarted = started;
-      if (!started)
-      {
-        await UpdateAuthenticationStateAsync(true, false, "Failed to start Codex CLI. Check Diagnostics.", false);
-        return;
-      }
-
-      var auth = await _host.CheckAuthenticationAsync(_options, _workingDir);
-      await HandleAuthenticationResultAsync(auth);
-      FocusInputBox();
-      UpdateTelemetryUi();
-
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("tool-window-loaded"));
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("tool-window-loaded"));
-    }
-
-    private void OnUnloaded(object sender, RoutedEventArgs e)
-    {
-      DisposeHost();
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await CleanupSolutionSubscriptionsAsync());
-      UnhookWindowEvents();
-      if (Current == this) Current = null;
-    }
-
-    private void ApplyEnvironmentSnapshot(EnvironmentSnapshot snapshot)
-    {
-      if (!string.IsNullOrEmpty(snapshot.WorkspaceRoot))
-        _lastKnownWorkspaceRoot = NormalizeDirectory(snapshot.WorkspaceRoot);
-
-      if (!string.IsNullOrEmpty(snapshot.SolutionRoot))
-        _lastKnownSolutionRoot = NormalizeDirectory(snapshot.SolutionRoot);
-    }
-
-    private CodexCliHost CreateHost()
-    {
-      var host = new CodexCliHost();
-      host.OnStdoutLine += HandleStdout;
-      host.OnStderrLine += HandleStderr;
-      return host;
-    }
-
-    private void DisposeHost()
-    {
-      StopHeartbeatTimer();
-      if (_host == null) return;
-      _host.OnStdoutLine -= HandleStdout;
-      _host.OnStderrLine -= HandleStderr;
-      _host.Dispose();
-      _host = null;
-      _cliStarted = false;
-      ClearApprovalState();
-    }
-
-    private async Task<bool> RestartCliAsync()
-    {
-      DisposeHost();
-      _rememberedExecApprovals.Clear();
-      _rememberedPatchApprovals.Clear();
-      ClearApprovalState();
-      _host = CreateHost();
-      var options = _options ?? new CodexOptions();
-      var dir = _workingDir ?? string.Empty;
-      var started = await _host.StartAsync(options, dir);
-      _cliStarted = started;
-      if (!started)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync("[error] Failed to restart Codex CLI");
-      }
-      return started;
-    }
-
-    private async Task UpdateAuthenticationStateAsync(
-      bool known,
-      bool isAuthenticated,
-      string message,
-      bool inProgress)
-    {
-      _authKnown = known;
-      _isAuthenticated = isAuthenticated;
-      _authMessage = message ?? string.Empty;
-      _authOperationInProgress = inProgress;
-      await RefreshAuthUiAsync();
-    }
-
-    private async Task RefreshAuthUiAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var banner = this.FindName("AuthBanner") as Border;
-      var text = this.FindName("AuthMessage") as TextBlock;
-      var login = this.FindName("LoginButton") as Button;
-      var logout = this.FindName("LogoutButton") as Button;
-      var shouldShowBanner = _authOperationInProgress || (!_isAuthenticated && _authKnown);
-
-      if (banner != null)
-        banner.Visibility = shouldShowBanner ? Visibility.Visible : Visibility.Collapsed;
-
-      if (text != null)
-      {
-        if (!string.IsNullOrWhiteSpace(_authMessage))
-          text.Text = _authMessage;
-        else if (_authOperationInProgress)
-          text.Text = "Checking Codex authentication...";
-        else if (_authKnown && !_isAuthenticated)
-          text.Text = "Codex login required. Click Login to continue.";
-        else
-          text.Text = "Codex is authenticated.";
-      }
-
-      if (login != null)
-      {
-        var showLogin = !_isAuthenticated || _authOperationInProgress;
-        login.Visibility = showLogin ? Visibility.Visible : Visibility.Collapsed;
-        login.IsEnabled = !_authOperationInProgress && !_isAuthenticated;
-      }
-
-      if (logout != null)
-      {
-        logout.Visibility = _authKnown && _isAuthenticated ? Visibility.Visible : Visibility.Collapsed;
-        logout.IsEnabled = !_authOperationInProgress;
-      }
-
-      if (this.FindName("SendButton") is Button send)
-      {
-        if (!_authKnown || !_isAuthenticated || _authOperationInProgress)
-        {
-          if (send.IsEnabled)
-          {
-            send.IsEnabled = false;
-            _authGatedSend = true;
-          }
-        }
-        else if (_authGatedSend)
-        {
-          send.IsEnabled = true;
-          _authGatedSend = false;
-        }
-      }
-    }
-
-    private async Task HandleAuthenticationResultAsync(
-      CodexCliHost.CodexAuthenticationResult result)
-    {
-      var whoami = ExtractFirstLine(result.Message);
-      if (result.IsAuthenticated)
-      {
-        var msg = string.IsNullOrEmpty(whoami)
-          ? "Codex is authenticated."
-          : whoami;
-        await UpdateAuthenticationStateAsync(true, true, msg, false);
-      }
-      else
-      {
-        var msg = string.IsNullOrEmpty(whoami)
-          ? "Codex login required. Click Login to continue."
-          : whoami;
-        await UpdateAuthenticationStateAsync(true, false, msg, false);
-      }
-    }
-
-    private static string ExtractFirstLine(string value)
-    {
-      if (string.IsNullOrWhiteSpace(value))
-        return string.Empty;
-
-      using var reader = new StringReader(value);
-      string line;
-      while ((line = reader.ReadLine()) != null)
-      {
-        if (!string.IsNullOrWhiteSpace(line))
-          return line.Trim();
-      }
-
-      return string.Empty;
-    }
-
-    private async void OnLoginClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await EnsureWorkingDirectoryUpToDateAsync("login-click");
-
-        var host = _host;
-        if (host == null)
-          return;
-
-        await UpdateAuthenticationStateAsync(_authKnown, _isAuthenticated, "Opening Codex login flow...", true);
-        var options = _options ?? new CodexOptions();
-        var dir = _workingDir ?? string.Empty;
-
-        var ok = await host.LoginAsync(options, dir);
-        if (!ok)
-        {
-          await UpdateAuthenticationStateAsync(true, _isAuthenticated, "codex login failed. Check Diagnostics.", false);
-          return;
-        }
-
-        await UpdateAuthenticationStateAsync(true, _isAuthenticated, "Restarting Codex CLI...", true);
-        var restarted = await RestartCliAsync();
-        if (!restarted)
-        {
-          await UpdateAuthenticationStateAsync(true, false, "CLI restart failed after login. See Diagnostics.", false);
-          return;
-        }
-
-        await UpdateAuthenticationStateAsync(true, _isAuthenticated, "Confirming Codex login...", true);
-        var auth = await _host.CheckAuthenticationAsync(options, dir);
-        await HandleAuthenticationResultAsync(auth);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] OnLoginClick failed: {ex.Message}");
-        await UpdateAuthenticationStateAsync(true, _isAuthenticated, "Login failed. Check Diagnostics.", false);
-      }
-    }
-
-    private async void OnLogoutClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await EnsureWorkingDirectoryUpToDateAsync("logout-click");
-
-        var host = _host;
-        if (host == null)
-          return;
-
-        await UpdateAuthenticationStateAsync(true, _isAuthenticated, "Signing out of Codex...", true);
-        var options = _options ?? new CodexOptions();
-        var dir = _workingDir ?? string.Empty;
-
-        var ok = await host.LogoutAsync(options, dir);
-        if (!ok)
-        {
-          await UpdateAuthenticationStateAsync(true, _isAuthenticated, "codex logout failed. Check Diagnostics.", false);
-          return;
-        }
-
-        await UpdateAuthenticationStateAsync(true, false, "Restarting Codex CLI...", true);
-        var restarted = await RestartCliAsync();
-        if (!restarted)
-        {
-          await UpdateAuthenticationStateAsync(true, false, "CLI restart failed after logout. See Diagnostics.", false);
-          return;
-        }
-
-        await UpdateAuthenticationStateAsync(true, false, "Confirming Codex logout...", true);
-        var auth = await _host.CheckAuthenticationAsync(options, dir);
-        await HandleAuthenticationResultAsync(auth);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] OnLogoutClick failed: {ex.Message}");
-        await UpdateAuthenticationStateAsync(true, false, "Logout failed. Check Diagnostics.", false);
-      }
-    }
-
-    private async void HandleStderr(string line)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[stderr] {line}");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleStderr failed: {ex.Message}");
-      }
-    }
-
-    private int _assistantChunkCounter;
-    private readonly TelemetryTracker _telemetry = new();
-
-    private async void HandleAgentMessageDelta(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var id = string.IsNullOrEmpty(evt.Id) ? "__unknown__" : evt.Id;
-        var text = ExtractDeltaText(evt);
-        if (string.IsNullOrEmpty(text))
-          return;
-
-        var turn = GetOrCreateAssistantTurn(id);
-        AppendAssistantText(turn, text);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleAgentMessageDelta failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleAgentMessage(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var id = string.IsNullOrEmpty(evt.Id) ? "__unknown__" : evt.Id;
-        var finalText = ExtractFinalText(evt);
-        if (!_assistantTurns.TryGetValue(id, out var turn))
-        {
-          if (string.IsNullOrEmpty(finalText))
-            return;
-          turn = GetOrCreateAssistantTurn(id);
-        }
-
-        if (!string.IsNullOrEmpty(finalText))
-        {
-          turn.Buffer.Clear();
-          AppendAssistantText(turn, finalText, isFinal: true);
-        }
-        else
-        {
-          turn.Bubble.Text = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
-        }
-
-        _assistantTurns.Remove(id);
-        await LogAssistantTextAsync(turn.Bubble.Text);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleAgentMessage failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleTokenCount(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var (total, input, output) = ExtractTokenCounts(evt);
-        if (total == null && input == null && output == null)
-          return;
-        UpdateTokenUsage(total, input, output);
-        _telemetry.RecordTokens(total, input, output);
-        UpdateTelemetryUi();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleTokenCount failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleStreamError(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var message = ExtractStreamErrorMessage(evt);
-        ShowStreamErrorBanner(message, !string.IsNullOrEmpty(_lastUserInput));
-        if (!string.IsNullOrEmpty(evt.Id) && _assistantTurns.TryGetValue(evt.Id, out var turn))
-        {
-          if (!turn.Buffer.ToString().EndsWith("[stream interrupted]", StringComparison.Ordinal))
-          {
-            if (turn.Buffer.Length > 0)
-              turn.Buffer.AppendLine().AppendLine();
-            AppendAssistantText(turn, "[stream interrupted]", decorate: false);
-          }
-          _assistantTurns.Remove(evt.Id);
-        }
-
-        var btn = this.FindName("SendButton") as Button;
-        var status = this.FindName("StatusText") as TextBlock;
-        if (btn != null) btn.IsEnabled = true;
-        if (status != null) status.Text = "Stream error";
-        await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
-        _telemetry.CancelTurn();
-        UpdateTelemetryUi();
-        UpdateStreamingIndicator(false);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleStreamError failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleApplyPatchApproval(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var host = _host;
-        if (host == null)
-          return;
-
-        var raw = evt.Raw ?? new JObject();
-        var signature = BuildPatchSignature(raw);
-        var callId = TryGetString(raw, "call_id") ?? evt.Id ?? string.Empty;
-        if (string.IsNullOrEmpty(callId))
-          return;
-
-        var options = _options ?? new CodexOptions();
-        EnqueueFullAccessBannerRefresh();
-        _lastPatchCallId = callId;
-        _lastPatchSignature = signature ?? string.Empty;
-        if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
-        {
-          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(callId, autoApproved));
-          if (autoApproved)
-            await ApplySelectedDiffsAsync();
-          await LogAutoApprovalAsync("patch", signature, autoApproved, autoReason);
-          await VS.StatusBar.ShowMessageAsync($"Codex patch {(autoApproved ? "approved" : "denied")} ({autoReason}).");
-          return;
-        }
-
-        var summary = TryGetString(raw, "summary") ?? "Apply patch from Codex?";
-        var canRemember = !string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature);
-        EnqueueApprovalRequest(new ApprovalRequest(ApprovalKind.Patch, callId, summary, signature, canRemember));
-        await VS.StatusBar.ShowMessageAsync("Codex awaiting patch approval.");
-        return;
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleApplyPatchApproval failed: {ex.Message}");
-      }
-    }
-
-    private async void HandlePatchApplyBegin(EventMsg evt)
-    {
-      try
-      {
-        var raw = evt.Raw ?? new JObject();
-        var summary = TryGetString(raw, "summary") ?? "Applying Codex patch...";
-        var total = TryGetInt(raw, "total", "count", "files") ?? 0;
-        await BeginPatchApplyProgressAsync(summary, total);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandlePatchApplyBegin failed: {ex.Message}");
-      }
-    }
-
-    private async void HandlePatchApplyEnd(EventMsg evt)
-    {
-      try
-      {
-        var raw = evt.Raw ?? new JObject();
-        var success = TryGetBoolean(raw, "success", "ok", "completed") ?? true;
-        var applied = TryGetInt(raw, "applied", "succeeded", "files_applied") ?? 0;
-        var failed = TryGetInt(raw, "failed", "errors", "files_failed") ?? 0;
-        var message = TryGetString(raw, "message") ?? TryGetString(raw, "description");
-        await CompletePatchApplyProgressAsync(success, applied, failed, message);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandlePatchApplyEnd failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleExecApproval(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        var host = _host;
-        if (host == null)
-          return;
-
-        var pane = await DiagnosticsPane.GetAsync();
-        if (evt.Raw != null)
-          await pane.WriteLineAsync($"[info] Exec approval request: {evt.Raw.ToString(Formatting.None)}");
-
-        var raw = evt.Raw ?? new JObject();
-        var (displayCommand, normalizedCommand) = ExtractExecCommandInfo(raw["command"]);
-        var signature = string.IsNullOrEmpty(normalizedCommand) ? displayCommand : normalizedCommand;
-        var callId = TryGetString(raw, "call_id") ?? evt.Id ?? string.Empty;
-        if (string.IsNullOrEmpty(callId))
-          return;
-
-        var cwd = TryGetString(raw, "cwd") ?? string.Empty;
-        var options = _options ?? new CodexOptions();
-        EnqueueFullAccessBannerRefresh();
-
-        if (TryResolveExecApproval(options.Mode, signature, out var autoApproved, out var autoReason))
-        {
-          await host.SendAsync(ApprovalSubmissionFactory.CreateExec(callId, autoApproved));
-          await LogAutoApprovalAsync("exec", signature, autoApproved, autoReason);
-          await VS.StatusBar.ShowMessageAsync($"Codex exec {(autoApproved ? "approved" : "denied")} ({autoReason}).");
-          return;
-        }
-
-        var commandForPrompt = string.IsNullOrEmpty(displayCommand) ? (TryGetString(raw, "command") ?? "(unknown)") : displayCommand;
-        var prompt = string.IsNullOrWhiteSpace(cwd)
-          ? $"Approve exec?\n{commandForPrompt}"
-          : $"Approve exec?\n{commandForPrompt}\nCWD: {cwd}";
-
-        var canRemember = !string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature);
-        EnqueueApprovalRequest(new ApprovalRequest(ApprovalKind.Exec, callId, prompt, signature, canRemember));
-        await VS.StatusBar.ShowMessageAsync("Codex awaiting exec approval.");
-        return;
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleExecApproval failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleExecCommandBegin(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var eventId = GetExecEventId(evt);
-        if (!string.IsNullOrEmpty(eventId) && !_execIdRemap.ContainsKey(eventId))
-          _execIdRemap[eventId] = eventId;
-
-        var commandToken = evt.Raw?["command"];
-        var (displayCommand, normalizedCommand) = ExtractExecCommandInfo(commandToken);
-        var cwd = NormalizeCwd(TryGetString(evt.Raw, "cwd"));
-        var header = BuildExecHeader(displayCommand, cwd);
-
-        string canonicalId = eventId;
-        if (!string.IsNullOrEmpty(normalizedCommand) &&
-            _execCommandIndex.TryGetValue(normalizedCommand, out var existingId))
-        {
-          canonicalId = existingId;
-          if (!string.IsNullOrEmpty(eventId))
-            _execIdRemap[eventId] = existingId;
-        }
-
-        if (string.IsNullOrEmpty(canonicalId))
-        {
-          canonicalId = RegisterExecFallbackId();
-        }
-        else
-        {
-          _execIdRemap[canonicalId] = canonicalId;
-        }
-
-        if (!string.IsNullOrEmpty(normalizedCommand) && !_execCommandIndex.ContainsKey(normalizedCommand))
-          _execCommandIndex[normalizedCommand] = canonicalId;
-
-        var previousHeader = _execTurns.TryGetValue(canonicalId, out var existingTurn)
-          ? existingTurn.Header?.Text
-          : null;
-
-        var turn = GetOrCreateExecTurn(canonicalId, header, normalizedCommand);
-        _execTurns[canonicalId] = turn;
-        _lastExecFallbackId = canonicalId;
-
-        UpdateExecCancelState(turn, running: true);
-        _telemetry.BeginExec(canonicalId, normalizedCommand);
-
-        var updatedHeader = turn.Header?.Text ?? header;
-        if (!string.IsNullOrEmpty(updatedHeader) &&
-            (string.IsNullOrEmpty(previousHeader) || !string.Equals(previousHeader, updatedHeader, StringComparison.Ordinal)))
-        {
-          await WriteExecDiagnosticsAsync(updatedHeader);
-        }
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleExecCommandBegin failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleExecCommandOutputDelta(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var execId = ResolveExecId(evt);
-        if (string.IsNullOrEmpty(execId))
-        {
-          execId = _lastExecFallbackId ?? RegisterExecFallbackId();
-          var eventId = GetExecEventId(evt);
-          if (!string.IsNullOrEmpty(eventId))
-            _execIdRemap[eventId] = execId;
-        }
-        else
-        {
-          var eventId = GetExecEventId(evt);
-          if (!string.IsNullOrEmpty(eventId) && !_execIdRemap.ContainsKey(eventId))
-            _execIdRemap[eventId] = execId;
-        }
-
-        var outText = TryGetString(evt.Raw, "text") ?? TryGetString(evt.Raw, "chunk") ?? TryGetString(evt.Raw, "data") ?? string.Empty;
-        var normalized = NormalizeExecChunk(outText);
-        if (string.IsNullOrEmpty(normalized))
-          return;
-
-        var turn = GetOrCreateExecTurn(execId, header: null, normalizedCommand: null);
-        AppendExecText(turn, normalized);
-        await WriteExecDiagnosticsAsync(normalized);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleExecCommandOutputDelta failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleExecCommandEnd(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var execId = ResolveExecId(evt);
-        if (string.IsNullOrEmpty(execId))
-        {
-          execId = _lastExecFallbackId ?? RegisterExecFallbackId();
-          var eventId = GetExecEventId(evt);
-          if (!string.IsNullOrEmpty(eventId))
-            _execIdRemap[eventId] = execId;
-        }
-        else
-        {
-          var eventId = GetExecEventId(evt);
-          if (!string.IsNullOrEmpty(eventId) && !_execIdRemap.ContainsKey(eventId))
-            _execIdRemap[eventId] = execId;
-        }
-
-        var exitCode = 0;
-        if (evt.Raw is JObject raw)
-          exitCode = TryGetInt(raw, "exit_code", "code", "status") ?? 0;
-
-        if (_execTurns.TryGetValue(execId, out var turn))
-        {
-          AppendExecText(turn, "$ exec finished\n");
-          UpdateExecCancelState(turn, running: false);
-          _execTurns.Remove(execId);
-          if (!string.IsNullOrEmpty(turn.NormalizedCommand) &&
-              _execCommandIndex.TryGetValue(turn.NormalizedCommand, out var mappedId) &&
-              string.Equals(mappedId, execId, StringComparison.Ordinal))
-          {
-            _execCommandIndex.Remove(turn.NormalizedCommand);
-          }
-        }
-        _telemetry.CompleteExec(execId, exitCode);
-        await WriteExecDiagnosticsAsync("$ exec finished");
-        if (_lastExecFallbackId == execId)
-          _lastExecFallbackId = null;
-
-        RemoveExecIdMappings(execId);
-        foreach (var key in _execCommandIndex.Where(kvp => string.Equals(kvp.Value, execId, StringComparison.Ordinal)).Select(kvp => kvp.Key).ToList())
-          _execCommandIndex.Remove(key);
-
-        UpdateTelemetryUi();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleExecCommandEnd failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleListMcpTools(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var tools = ExtractMcpTools(evt.Raw);
-
-        _mcpTools.Clear();
-        foreach (var tool in tools)
-          _mcpTools.Add(tool);
-
-        UpdateMcpToolsUi();
-
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[info] MCP tools received: {_mcpTools.Count}.");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleListMcpTools failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleListCustomPrompts(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var prompts = ExtractCustomPrompts(evt.Raw);
-
-        _customPrompts.Clear();
-        _customPromptIndex.Clear();
-        foreach (var prompt in prompts)
-        {
-          _customPrompts.Add(prompt);
-          _customPromptIndex[prompt.Id] = prompt;
-        }
-
-        UpdateCustomPromptsUi();
-
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[info] Custom prompts received: {_customPrompts.Count}.");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleListCustomPrompts failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleToolCallBegin(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var raw = evt.Raw ?? new JObject();
-        var callId = ResolveToolCallId(evt);
-        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
-        var server = TryGetString(raw, "server", "provider", "source");
-        var status = TryGetString(raw, "status", "state");
-        var detail = FormatToolArguments(raw);
-
-        var run = EnsureToolRun(callId, toolName, server);
-        run.UpdateRunning(status, detail);
-        callId = run.CallId;
-
-        UpdateMcpToolRunsUi();
-
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[info] Tool call started: {run.ToolName} ({callId})");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleToolCallBegin failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleToolCallOutput(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var raw = evt.Raw ?? new JObject();
-        var callId = ResolveToolCallId(evt);
-        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
-        var server = TryGetString(raw, "server", "provider", "source");
-        var run = EnsureToolRun(callId, toolName, server);
-        callId = run.CallId;
-
-        var output = ExtractToolOutputText(raw);
-        if (!string.IsNullOrWhiteSpace(output))
-          run.AppendOutput(output);
-
-        UpdateMcpToolRunsUi();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleToolCallOutput failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleToolCallEnd(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var raw = evt.Raw ?? new JObject();
-        var callId = ResolveToolCallId(evt);
-        var toolName = TryGetString(raw, "tool_name", "tool", "name", "id");
-        var server = TryGetString(raw, "server", "provider", "source");
-        var run = EnsureToolRun(callId, toolName, server);
-        callId = run.CallId;
-
-        var status = TryGetString(raw, "status", "state", "result", "outcome");
-        var success = TryGetBoolean(raw, "success", "ok", "completed") ?? InterpretToolStatus(status);
-        var detail = ExtractToolCompletionDetail(raw);
-
-        run.Complete(status, success, detail);
-        UpdateMcpToolRunsUi();
-
-        var pane = await DiagnosticsPane.GetAsync();
-        var outcome = success == false ? "failed" : "completed";
-        await pane.WriteLineAsync($"[info] Tool call {outcome}: {run.ToolName} ({callId})");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleToolCallEnd failed: {ex.Message}");
-      }
-    }
-
-    private async void HandleTurnDiff(EventMsg evt)
-    {
-      try
-      {
-        var docs = DiffUtilities.ExtractDocuments(evt.Raw);
-        if (docs.Count == 0)
-        {
-          var pane = await DiagnosticsPane.GetAsync();
-          await pane.WriteLineAsync("[warn] TurnDiff event missing diff content; nothing to display.");
-          return;
-        }
-
-        var filtered = await ProcessDiffDocumentsAsync(docs);
-        if (filtered.Count == 0)
-        {
-          await UpdateDiffTreeAsync(filtered);
-          var pane = await DiagnosticsPane.GetAsync();
-          await pane.WriteLineAsync("[info] Codex diff contained no textual changes after filtering.");
-          if (this.FindName("StatusText") is TextBlock status)
-            status.Text = "Codex diff contained no textual changes.";
-          return;
-        }
-
-        await UpdateDiffTreeAsync(filtered);
-
-        foreach (var doc in filtered)
-          await ShowDiffAsync(doc);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleTurnDiff failed: {ex.Message}");
-      }
-    }
-
-    private async Task UpdateDiffTreeAsync(IReadOnlyList<DiffDocument> docs)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (this.FindName("DiffTreeContainer") is not Border container ||
-          this.FindName("DiffTreeView") is not TreeView tree ||
-          this.FindName("DiffSelectionSummary") is not TextBlock summary ||
-          this.FindName("DiscardPatchButton") is not Button discardButton)
-        return;
-
-      if (docs == null || docs.Count == 0)
-      {
-        _diffDocuments.Clear();
-        _diffTreeRoots.Clear();
-        _diffTotalLeafCount = 0;
-        tree.ItemsSource = null;
-        container.Visibility = Visibility.Collapsed;
-        summary.Text = string.Empty;
-        summary.Visibility = Visibility.Collapsed;
-        discardButton.Visibility = Visibility.Collapsed;
-        return;
-      }
-
-      _diffDocuments = docs
-        .GroupBy(doc => NormalizeDiffPath(doc.Path))
-        .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
-
-      _suppressDiffSelectionUpdate = true;
-      try
-      {
-        var (roots, leafCount) = BuildDiffTree(docs, HandleDiffSelectionChanged);
-        _diffTotalLeafCount = leafCount;
-        _diffTreeRoots = new ObservableCollection<DiffTreeItem>(roots);
-        tree.ItemsSource = _diffTreeRoots;
-        container.Visibility = Visibility.Visible;
-        discardButton.Visibility = Visibility.Visible;
-      }
-      finally
-      {
-        _suppressDiffSelectionUpdate = false;
-      }
-
-      UpdateDiffSelectionSummary();
-    }
-
-    private async Task<List<DiffDocument>> ProcessDiffDocumentsAsync(IReadOnlyList<DiffDocument> docs)
-    {
-      var filtered = new List<DiffDocument>();
-      if (docs == null)
-        return filtered;
-
-      var pane = await DiagnosticsPane.GetAsync();
-      foreach (var doc in docs)
-      {
-        if (doc.IsBinary)
-        {
-          await pane.WriteLineAsync($"[warn] Skipping binary diff for {doc.Path}; manual review recommended.");
-          continue;
-        }
-
-        if (doc.IsEmpty)
-        {
-          await pane.WriteLineAsync($"[info] Empty diff for {doc.Path}; nothing to display.");
-          continue;
-        }
-
-        filtered.Add(doc);
-      }
-
-      return filtered;
-    }
-
-    private async void HandleTaskComplete(EventMsg evt)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var btn = this.FindName("SendButton") as Button;
-        var status = this.FindName("StatusText") as TextBlock;
-        if (btn != null) btn.IsEnabled = true;
-        if (status != null) status.Text = string.Empty;
-        HideStreamErrorBanner();
-        UpdateStreamingIndicator(false);
-        _telemetry.CompleteTurn();
-        UpdateTelemetryUi();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] HandleTaskComplete failed: {ex.Message}");
-      }
-    }
-
-    private void HandleStdout(string line)
-    {
-      var evt = EventParser.Parse(line);
-      switch (evt.Kind)
-      {
-        case EventKind.SessionConfigured:
-          CodexVS22.Core.CodexCliHost.LastRolloutPath = TryGetString(evt.Raw, "rollout_path");
-          ConfigureHeartbeat(evt);
-          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("session-configured"));
-          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("session-configured"));
-          break;
-        case EventKind.AgentMessageDelta:
-          HandleAgentMessageDelta(evt);
-          break;
-        case EventKind.AgentMessage:
-          HandleAgentMessage(evt);
-          break;
-        case EventKind.TokenCount:
-          HandleTokenCount(evt);
-          break;
-        case EventKind.StreamError:
-          HandleStreamError(evt);
-          break;
-        case EventKind.ApplyPatchApprovalRequest:
-          HandleApplyPatchApproval(evt);
-          break;
-        case EventKind.ExecApprovalRequest:
-          HandleExecApproval(evt);
-          break;
-        case EventKind.ExecCommandBegin:
-          HandleExecCommandBegin(evt);
-          break;
-        case EventKind.ExecCommandOutputDelta:
-          HandleExecCommandOutputDelta(evt);
-          break;
-        case EventKind.ExecCommandEnd:
-          HandleExecCommandEnd(evt);
-          break;
-        case EventKind.ListMcpTools:
-          HandleListMcpTools(evt);
-          break;
-        case EventKind.ListCustomPrompts:
-          HandleListCustomPrompts(evt);
-          break;
-        case EventKind.ToolCallBegin:
-          HandleToolCallBegin(evt);
-          break;
-        case EventKind.ToolCallOutput:
-          HandleToolCallOutput(evt);
-          break;
-        case EventKind.ToolCallEnd:
-          HandleToolCallEnd(evt);
-          break;
-        case EventKind.TurnDiff:
-          HandleTurnDiff(evt);
-          break;
-        case EventKind.PatchApplyBegin:
-          HandlePatchApplyBegin(evt);
-          break;
-        case EventKind.PatchApplyEnd:
-          HandlePatchApplyEnd(evt);
-          break;
-        case EventKind.TaskComplete:
-          HandleTaskComplete(evt);
-          break;
-        default:
-          break;
-      }
-    }
-
-    private void OnClearClick(object sender, RoutedEventArgs e)
-    {
-      if (System.Windows.MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-      {
-        ResetTranscript();
-        if (this.FindName("InputBox") is TextBox box) box.Clear();
-        _assistantTurns.Clear();
-        _execTurns.Clear();
-        _execConsoleTurns.Clear();
-        _execCommandIndex.Clear();
-        _execIdRemap.Clear();
-        _rememberedExecApprovals.Clear();
-        _rememberedPatchApprovals.Clear();
-        _mcpToolRuns.Clear();
-        _mcpToolRunIndex.Clear();
-        UpdateMcpToolRunsUi();
-        ClearApprovalState(hideBanner: false);
-        ShowApprovalBanner(null);
-        _lastExecFallbackId = null;
-        _lastUserInput = string.Empty;
-        _assistantChunkCounter = 0;
-        _telemetry.Reset();
-        ClearTokenUsage();
-        HideStreamErrorBanner();
-        UpdateStreamingIndicator(false);
-        FocusInputBox();
-        UpdateTelemetryUi();
-        ScrollTranscriptToEnd();
-      }
-    }
-
-    private async void OnResetApprovalsClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var execCount = _rememberedExecApprovals.Count;
-        var patchCount = _rememberedPatchApprovals.Count;
-        _rememberedExecApprovals.Clear();
-        _rememberedPatchApprovals.Clear();
-
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[info] Reset remembered approvals (exec={execCount}, patch={patchCount}).");
-        await VS.StatusBar.ShowMessageAsync("Codex approvals reset for this session.");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Reset approvals failed: {ex.Message}");
-      }
-    }
-
-    private void OnApprovalApproveClick(object sender, RoutedEventArgs e)
-    {
-      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(true));
-    }
-
-    private void OnApprovalDenyClick(object sender, RoutedEventArgs e)
-    {
-      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(false));
-    }
-
-    private async void OnCopyAllClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var text = CollectTranscriptText();
-        if (string.IsNullOrWhiteSpace(text))
-          return;
-        Clipboard.SetText(text);
-        await VS.StatusBar.ShowMessageAsync("Transcript copied to clipboard.");
-        if (sender is Button button)
-        {
-          AnimateButtonFeedback(button);
-        }
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Copy all failed: {ex.Message}");
-      }
-    }
-
-    private string CollectTranscriptText()
-    {
-      if (this.FindName("Transcript") is not StackPanel transcript)
-        return string.Empty;
-
-      var builder = new StringBuilder();
-      foreach (var child in transcript.Children)
-      {
-        if (child is FrameworkElement element)
-        {
-          var text = ExtractTextFromElement(element);
-          if (string.IsNullOrWhiteSpace(text))
-            continue;
-          if (builder.Length > 0)
-            builder.AppendLine().AppendLine();
-          builder.Append(text.TrimEnd());
-        }
-      }
-
-      return builder.ToString();
-    }
-
-    private static string ExtractTextFromElement(FrameworkElement element)
-    {
-      switch (element)
-      {
-        case null:
-          return string.Empty;
-        case TextBlock tb:
-          return tb.Text ?? string.Empty;
-        case Border border:
-          return ExtractTextFromElement(border.Child as FrameworkElement);
-        case StackPanel panel:
-          return ExtractTextFromPanel(panel);
-        default:
-          return string.Empty;
-      }
-    }
-
-    private static string ExtractTextFromPanel(StackPanel panel)
-    {
-      if (panel == null)
-        return string.Empty;
-
-      var builder = new StringBuilder();
-      foreach (var child in panel.Children)
-      {
-        if (child is FrameworkElement element)
-        {
-          var text = ExtractTextFromElement(element);
-          if (string.IsNullOrWhiteSpace(text))
-            continue;
-          if (builder.Length > 0)
-            builder.AppendLine();
-          builder.Append(text.TrimEnd());
-        }
-      }
-
-      return builder.ToString();
-    }
-
-    private static void AnimateButtonFeedback(Button button)
-    {
-      var animation = new DoubleAnimation(1.0, 0.6, TimeSpan.FromMilliseconds(140))
-      {
-        AutoReverse = true,
-        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
-      };
-      button.BeginAnimation(UIElement.OpacityProperty, animation);
-    }
-
-    private static void AnimateBubbleFeedback(TextBlock bubble)
-    {
-      var baseBrush = bubble.Background as SolidColorBrush;
-      if (baseBrush == null || baseBrush.IsFrozen)
-      {
-        baseBrush = new SolidColorBrush(Colors.Transparent);
-        bubble.Background = baseBrush;
-      }
-
-      var animation = new ColorAnimation
-      {
-        From = Colors.Transparent,
-        To = Color.FromArgb(80, 0, 120, 215),
-        Duration = TimeSpan.FromMilliseconds(120),
-        AutoReverse = true,
-        EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-      };
-
-      baseBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
-    }
-
-    private sealed class TelemetryTracker
-    {
-      private int _turns;
-      private int _totalTokens;
-      private double _totalSeconds;
-      private int _currentTokens;
-      private DateTime? _turnStart;
-      private int _patchSuccesses;
-      private int _patchFailures;
-      private double _patchSeconds;
-      private DateTime? _patchStart;
-      private readonly Dictionary<string, DateTime> _execStarts = new(StringComparer.Ordinal);
-      private int _execCount;
-      private int _execNonZero;
-      private double _execSeconds;
-      private int _toolInvocations;
-      private int _promptInserts;
-
-      public void BeginTurn()
-      {
-        _turnStart = DateTime.UtcNow;
-        _currentTokens = 0;
-      }
-
-      public void RecordTokens(int? total, int? input, int? output)
-      {
-        if (!_turnStart.HasValue)
-          return;
-
-        var candidate = 0;
-        if (total.HasValue) candidate = Math.Max(candidate, total.Value);
-        if (output.HasValue) candidate = Math.Max(candidate, output.Value);
-        if (input.HasValue) candidate = Math.Max(candidate, input.Value);
-
-        if (candidate > _currentTokens)
-          _currentTokens = candidate;
-      }
-
-      public void CompleteTurn()
-      {
-        if (!_turnStart.HasValue)
-          return;
-
-        var elapsed = Math.Max(0.05, (DateTime.UtcNow - _turnStart.Value).TotalSeconds);
-        _turns++;
-        _totalTokens += _currentTokens;
-        _totalSeconds += elapsed;
-        _turnStart = null;
-        _currentTokens = 0;
-      }
-
-      public void CancelTurn()
-      {
-        _turnStart = null;
-        _currentTokens = 0;
-      }
-
-      public void BeginPatch()
-      {
-        _patchStart = DateTime.UtcNow;
-      }
-
-      public void CompletePatch(bool success, double durationSeconds)
-      {
-        if (durationSeconds <= 0 && _patchStart.HasValue)
-          durationSeconds = Math.Max(0.01, (DateTime.UtcNow - _patchStart.Value).TotalSeconds);
-        else if (durationSeconds <= 0)
-          durationSeconds = 0.01;
-
-        _patchSeconds += durationSeconds;
-        if (success)
-          _patchSuccesses++;
-        else
-          _patchFailures++;
-        _patchStart = null;
-      }
-
-      public void CancelPatch()
-      {
-        _patchStart = null;
-      }
-
-      public void BeginExec(string id, string command)
-      {
-        if (string.IsNullOrEmpty(id))
-          return;
-
-        _execStarts[id] = DateTime.UtcNow;
-      }
-
-      public void CompleteExec(string id, int exitCode)
-      {
-        if (string.IsNullOrEmpty(id))
-          return;
-
-        if (_execStarts.TryGetValue(id, out var start))
-        {
-          var elapsed = Math.Max(0.05, (DateTime.UtcNow - start).TotalSeconds);
-          _execSeconds += elapsed;
-          _execCount++;
-          if (exitCode != 0)
-            _execNonZero++;
-          _execStarts.Remove(id);
-        }
-      }
-
-      public void CancelExec(string id)
-      {
-        if (string.IsNullOrEmpty(id))
-          return;
-
-        _execStarts.Remove(id);
-      }
-
-      public void RecordToolInvocation()
-      {
-        _toolInvocations++;
-      }
-
-      public void RecordPromptInsert()
-      {
-        _promptInserts++;
-      }
-
-      public void Reset()
-      {
-        _turns = 0;
-        _totalTokens = 0;
-        _totalSeconds = 0;
-        _currentTokens = 0;
-        _turnStart = null;
-        _patchSuccesses = 0;
-        _patchFailures = 0;
-        _patchSeconds = 0;
-        _patchStart = null;
-        _execStarts.Clear();
-        _execCount = 0;
-        _execNonZero = 0;
-        _execSeconds = 0;
-        _toolInvocations = 0;
-        _promptInserts = 0;
-      }
-
-      public string GetSummary()
-      {
-        var parts = new List<string>();
-
-        if (_turns > 0)
-        {
-          var avgTokens = (double)_totalTokens / Math.Max(1, _turns);
-          var rate = _totalSeconds > 0 ? _totalTokens / _totalSeconds : 0;
-          parts.Add($"Turns {_turns} avg {avgTokens:F1} tok {rate:F1} tok/s");
-        }
-
-        var patchTotal = _patchSuccesses + _patchFailures;
-        if (patchTotal > 0)
-        {
-          var avgSeconds = _patchSeconds / Math.Max(1, patchTotal);
-          parts.Add($"Patch {_patchSuccesses}/{_patchFailures} avg {avgSeconds:F1}s");
-        }
-
-        if (_execCount > 0)
-        {
-          var avgSeconds = _execSeconds / Math.Max(1, _execCount);
-          parts.Add($"Exec {_execCount} avg {avgSeconds:F1}s fail {_execNonZero}");
-        }
-
-        if (_toolInvocations > 0)
-        {
-          parts.Add($"Tools {_toolInvocations}");
-        }
-
-        if (_promptInserts > 0)
-        {
-          parts.Add($"Prompts {_promptInserts}");
-        }
-
-        return parts.Count == 0 ? string.Empty : string.Join(" • ", parts);
-      }
-    }
-
-    private void ApplyWindowPreferences()
-    {
-      Dispatcher.BeginInvoke(new Action(() =>
-      {
-        var window = Window.GetWindow(this);
-        if (window == null)
-          return;
-
-        if (!ReferenceEquals(_hostWindow, window))
-        {
-          UnhookWindowEvents();
-          _hostWindow = window;
-        }
-
-        ApplyWindowSettings(window);
-      HookWindowEvents(window);
-      }), DispatcherPriority.Background);
-    }
-
-    private void ApplyExecConsoleToggleState()
-    {
-      if (FindName("ExecConsoleToggle") is not ToggleButton toggle)
-        return;
-
-      _suppressExecToggleEvent = true;
-      toggle.IsChecked = _options?.ExecConsoleVisible ?? true;
-      _suppressExecToggleEvent = false;
-
-      foreach (var turn in _execConsoleTurns)
-        ApplyExecConsoleVisibility(turn);
-    }
-
-    private void InitializeMcpToolsUi()
-    {
-      if (FindName("McpToolsList") is ItemsControl list)
-        list.ItemsSource = _mcpTools;
-
-      if (FindName("McpToolRunsList") is ItemsControl runs)
-        runs.ItemsSource = _mcpToolRuns;
-
-      if (FindName("CustomPromptsList") is ItemsControl prompts)
-        prompts.ItemsSource = _customPrompts;
-
-      UpdateMcpToolsUi();
-      UpdateMcpToolRunsUi();
-      UpdateCustomPromptsUi();
-    }
-
-    private void HookWindowEvents(System.Windows.Window window)
-    {
-      if (window == null || _windowEventsHooked)
-        return;
-
-      window.SizeChanged += OnHostWindowSizeChanged;
-      window.LocationChanged += OnHostWindowLocationChanged;
-      window.StateChanged += OnHostWindowStateChanged;
-      _windowEventsHooked = true;
-    }
-
-    private void UnhookWindowEvents()
-    {
-      if (_hostWindow == null || !_windowEventsHooked)
-        return;
-
-      _hostWindow.SizeChanged -= OnHostWindowSizeChanged;
-      _hostWindow.LocationChanged -= OnHostWindowLocationChanged;
-      _hostWindow.StateChanged -= OnHostWindowStateChanged;
-      _windowEventsHooked = false;
-      _hostWindow = null;
-    }
-
-    private void ApplyWindowSettings(System.Windows.Window window)
-    {
-      if (window == null || _options == null)
-        return;
-
-      if (window.WindowState == WindowState.Normal)
-      {
-        if (_options.WindowWidth > 0)
-          window.Width = _options.WindowWidth;
-        if (_options.WindowHeight > 0)
-          window.Height = _options.WindowHeight;
-
-        if (!double.IsNaN(_options.WindowLeft))
-          window.Left = _options.WindowLeft;
-        if (!double.IsNaN(_options.WindowTop))
-          window.Top = _options.WindowTop;
-      }
-
-      if (!string.IsNullOrWhiteSpace(_options.WindowState) &&
-          Enum.TryParse(_options.WindowState, out WindowState state))
-      {
-        window.WindowState = state;
-      }
-    }
-
-    private void OnHostWindowSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-      if (_options == null)
-        return;
-
-      if (sender is Window window && window.WindowState == WindowState.Normal)
-      {
-        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
-        {
-          _options.WindowWidth = e.NewSize.Width;
-          _options.WindowHeight = e.NewSize.Height;
-          QueueOptionSave();
-        }
-      }
-    }
-
-    private void OnHostWindowLocationChanged(object sender, EventArgs e)
-    {
-      if (_options == null)
-        return;
-
-      if (sender is Window window && window.WindowState == WindowState.Normal)
-      {
-        _options.WindowLeft = window.Left;
-        _options.WindowTop = window.Top;
-        QueueOptionSave();
-      }
-    }
-
-    private void OnHostWindowStateChanged(object sender, EventArgs e)
-    {
-      if (_options == null)
-        return;
-
-      if (sender is Window window)
-      {
-        _options.WindowState = window.WindowState.ToString();
-        if (window.WindowState == WindowState.Normal)
-        {
-          _options.WindowWidth = window.Width;
-          _options.WindowHeight = window.Height;
-          _options.WindowLeft = window.Left;
-          _options.WindowTop = window.Top;
-        }
-        QueueOptionSave();
-      }
-    }
-
-    private async Task<string> DetermineInitialWorkingDirectoryAsync()
-    {
-      var resolution = await ResolveWorkingDirectoryAsync();
-      await LogWorkingDirectoryResolutionAsync("initial load", resolution, previous: null, includeCandidates: true);
-
-      var path = resolution?.Selected?.Path;
-      if (string.IsNullOrEmpty(path))
-        path = NormalizeDirectory(Environment.CurrentDirectory);
-
-      return path;
-    }
-
-    private async Task<WorkingDirectoryResolution> ResolveWorkingDirectoryAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var seeds = new List<CandidateSeed>();
-
-      if (!string.IsNullOrEmpty(_lastKnownSolutionRoot))
-        seeds.Add(new CandidateSeed("SolutionReadyHint", _lastKnownSolutionRoot, false));
-      if (!string.IsNullOrEmpty(_lastKnownWorkspaceRoot))
-        seeds.Add(new CandidateSeed("WorkspaceReadyHint", _lastKnownWorkspaceRoot, true));
-
-      var dte = await VS.GetServiceAsync<DTE, DTE2>();
-      var solutionFullDir = SafeInvoke(() => GetDirectoryFromFile(GetActiveSolutionFullName(dte)));
-      TryAddCandidate(seeds, "DTE.Solution.FullName", () => solutionFullDir);
-      TryAddCandidate(seeds, "TryFindSolutionDirectory(DTE.Solution.FullName)", () => TryFindSolutionDirectory(solutionFullDir));
-
-      var solutionFileDir = SafeInvoke(() => GetDirectoryFromFile(GetActiveSolutionFileName(dte)));
-      TryAddCandidate(seeds, "DTE.Solution.FileName", () => solutionFileDir);
-
-      TryAddCandidate(seeds, "DTE.Solution.Properties.Path", () => GetDteSolutionProperty(dte, "Path"));
-
-      var solutionItem = await SafeGetCurrentSolutionAsync();
-      TryAddCandidate(seeds, "VS.Solutions.Current.FullPath", () => GetSolutionItemPath(solutionItem));
-
-      var solutionDirFromService = await SafeInvokeAsync(() => GetSolutionDirectoryFromServiceAsync());
-      TryAddCandidate(seeds, "IVsSolution.VSPROPID_SolutionDirectory", () => solutionDirFromService);
-
-      var solutionRootDirectory = await SafeInvokeAsync(() => GetSolutionRootDirectoryAsync());
-      TryAddCandidate(seeds, "IVsSolution.GetSolutionRootDirectory", () => solutionRootDirectory);
-
-      var workspaceRoot = await SafeInvokeAsync(() => GetFolderWorkspaceRootAsync());
-      TryAddCandidate(seeds, "FolderWorkspace.Current.Location", () => workspaceRoot, isWorkspaceRoot: true);
-
-      var solutionInfo = await SafeInvokeTupleAsync(() => GetSolutionInfoAsync());
-      TryAddCandidate(seeds, "IVsSolution.GetSolutionInfo.Directory", () => solutionInfo.Item1);
-      TryAddCandidate(seeds, "IVsSolution.GetSolutionInfo.FileDir", () => GetDirectoryFromFile(solutionInfo.Item2));
-
-      var activeProjectItem = await GetActiveProjectAsync();
-      TryAddCandidate(seeds, "VS.Solutions.ActiveProject", () => GetSolutionItemPath(activeProjectItem));
-
-      AddProjectDirectoryCandidates(seeds, dte);
-
-      TryAddCandidate(seeds, "DTE.ActiveDocument", () => GetActiveDocumentDirectory(dte));
-
-      var selectedItems = await GetActiveSolutionItemsAsync();
-      foreach (var item in selectedItems)
-      {
-        var localItem = item;
-        TryAddCandidate(seeds, $"VS.Solutions.ActiveItem:{localItem?.Type}", () => GetSolutionItemPath(localItem));
-      }
-
-      TryAddCandidate(seeds, "Environment.CurrentDirectory", () => Environment.CurrentDirectory);
-      TryAddCandidate(seeds, "TryFindSolutionDirectory(Environment)", () => TryFindSolutionDirectory(Environment.CurrentDirectory));
-
-      var analyzed = seeds
-        .Select(AnalyzeCandidate)
-        .ToList();
-
-      var best = SelectBestCandidate(analyzed);
-
-      return new WorkingDirectoryResolution(best, analyzed);
-    }
-
-    private async Task LogWorkingDirectoryResolutionAsync(
-      string reason,
-      WorkingDirectoryResolution resolution,
-      string previous,
-      bool includeCandidates)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var timestamp = DateTime.Now.ToString("HH:mm:ss");
-        var bestPath = resolution?.Selected?.Path;
-        var display = string.IsNullOrEmpty(bestPath) ? "<none>" : bestPath;
-        var source = resolution?.Selected?.Source ?? "<unknown>";
-
-        if (!string.IsNullOrEmpty(previous) && !PathsEqual(previous, bestPath))
-        {
-          await pane.WriteLineAsync($"[info] {timestamp} Working directory updated ({reason}): {display} (source: {source})");
-          await pane.WriteLineAsync($"[info] {timestamp} Previous working directory: {previous}");
-        }
-        else
-        {
-          await pane.WriteLineAsync($"[info] {timestamp} Working directory ({reason}): {display} (source: {source})");
-        }
-
-        if (includeCandidates && resolution?.Candidates != null)
-        {
-          foreach (var candidate in resolution.Candidates)
-          {
-            var value = string.IsNullOrEmpty(candidate.Path) ? "<empty>" : candidate.Path;
-            var labels = new List<string>
-            {
-              candidate.Exists ? "exists" : "missing",
-              candidate.HasSolution ? "has .sln" : "no .sln",
-              candidate.HasProject ? "has project" : "no project"
-            };
-            if (candidate.IsWorkspaceRoot)
-              labels.Add("workspace-root");
-            if (candidate.IsInsideExtension)
-              labels.Add("extension-root");
-
-            var status = string.Join(", ", labels);
-            await pane.WriteLineAsync($"[debug] working dir candidate {candidate.Source}: {value} ({status})");
-          }
-        }
-      }
-      catch
-      {
-        // best effort logging only
-      }
-    }
-
-    private async Task<string> GetSolutionDirectoryFromServiceAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var solutionService = await GetSolutionServiceAsync();
-      if (solutionService == null)
-        return string.Empty;
-
-      try
-      {
-        solutionService.GetProperty((int)__VSPROPID.VSPROPID_SolutionDirectory, out var dirObj);
-        if (dirObj is string dir)
-          return dir;
-      }
-      catch
-      {
-        // ignore and fall back
-      }
-
-      return string.Empty;
-    }
-
-    private async Task<(string Directory, string File)> GetSolutionInfoAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var solutionService = await GetSolutionServiceAsync();
-      if (solutionService == null)
-        return (string.Empty, string.Empty);
-
-      try
-      {
-        if (ErrorHandler.Succeeded(solutionService.GetSolutionInfo(out var dir, out var file, out _)))
-          return (NormalizeDirectory(dir), file ?? string.Empty);
-      }
-      catch
-      {
-        // ignore and fall back
-      }
-
-      return (string.Empty, string.Empty);
-    }
-
-    private async Task<IVsSolution> GetSolutionServiceAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      if (_solutionService != null)
-        return _solutionService;
-
-      _solutionService = await VS.GetServiceAsync<SVsSolution, IVsSolution>();
-      return _solutionService;
-    }
-
-    private static string GetDirectoryFromFile(string path)
-    {
-      if (string.IsNullOrWhiteSpace(path))
-        return string.Empty;
-
-      try
-      {
-        if (Directory.Exists(path))
-          return NormalizeDirectory(path);
-
-        if (File.Exists(path))
-        {
-          var fileDirectory = Path.GetDirectoryName(path);
-          return string.IsNullOrEmpty(fileDirectory) ? string.Empty : NormalizeDirectory(fileDirectory);
-        }
-
-        var directory = Path.GetDirectoryName(path);
-        return string.IsNullOrEmpty(directory) ? string.Empty : NormalizeDirectory(directory);
-      }
-      catch
-      {
-        return string.Empty;
-      }
-    }
-
-    private static string NormalizeDirectory(string path)
-    {
-      if (string.IsNullOrWhiteSpace(path))
-        return string.Empty;
-
-      try
-      {
-        var full = Path.GetFullPath(path);
-        return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-      }
-      catch
-      {
-        return path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-      }
-    }
-
-    private static bool PathsEqual(string left, string right)
-    {
-      var normalizedLeft = NormalizeDirectory(left);
-      var normalizedRight = NormalizeDirectory(right);
-      return string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string TryFindSolutionDirectory(string start)
-    {
-      if (string.IsNullOrWhiteSpace(start))
-        return string.Empty;
-
-      try
-      {
-        var current = NormalizeDirectory(start);
-        var depth = 0;
-        while (!string.IsNullOrEmpty(current) && Directory.Exists(current) && depth < 6)
-        {
-          if (Directory.EnumerateFiles(current, "*.sln").Any())
-            return current;
-
-          var parent = Path.GetDirectoryName(current);
-          if (string.IsNullOrEmpty(parent) || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
-            break;
-
-          current = NormalizeDirectory(parent);
-          depth++;
-        }
-      }
-      catch
-      {
-        // ignore and fall back to the provided directory
-      }
-
-      return string.Empty;
-    }
-
-    private static WorkingDirectoryCandidate AnalyzeCandidate(CandidateSeed seed)
-    {
-      if (string.IsNullOrWhiteSpace(seed.Path) || seed.Path.StartsWith("<", StringComparison.Ordinal))
-        return new WorkingDirectoryCandidate(seed.Source ?? string.Empty, string.Empty, false, false, false, -1, seed.IsWorkspaceRoot);
-
-      var normalized = NormalizeDirectory(seed.Path);
-      var exists = !string.IsNullOrEmpty(normalized) && Directory.Exists(normalized);
-      var hasSolution = exists && DirectoryContainsFiles(normalized, "*.sln");
-      var hasProject = exists && DirectoryContainsFiles(normalized, "*.csproj", "*.vbproj", "*.fsproj", "*.vcxproj", "*.vcproj");
-      var depth = CalculatePathDepth(normalized);
-      return new WorkingDirectoryCandidate(seed.Source ?? string.Empty, normalized, exists, hasSolution, hasProject, depth, seed.IsWorkspaceRoot);
-    }
-
-    private static void TryAddCandidate(List<CandidateSeed> list, string source, Func<string> resolver, bool isWorkspaceRoot = false)
-    {
-      if (list == null)
-        return;
-
-      string result;
-      try
-      {
-        result = resolver?.Invoke() ?? string.Empty;
-      }
-      catch (COMException ex)
-      {
-        result = $"<COMException:{ex.ErrorCode:X8}>";
-      }
-      catch (Exception ex)
-      {
-        result = $"<Exception:{ex.GetType().Name}>";
-      }
-
-      list.Add(new CandidateSeed(source, result ?? string.Empty, isWorkspaceRoot));
-    }
-
-    private static string SafeInvoke(Func<string> resolver)
-    {
-      try
-      {
-        return resolver?.Invoke() ?? string.Empty;
-      }
-      catch (COMException ex)
-      {
-        return $"<COMException:{ex.ErrorCode:X8}>";
-      }
-      catch (Exception ex)
-      {
-        return $"<Exception:{ex.GetType().Name}>";
-      }
-    }
-
-    private static async Task<string> SafeInvokeAsync(Func<Task<string>> resolver)
-    {
-      if (resolver == null)
-        return string.Empty;
-
-      try
-      {
-        return await resolver().ConfigureAwait(true) ?? string.Empty;
-      }
-      catch (COMException ex)
-      {
-        return $"<COMException:{ex.ErrorCode:X8}>";
-      }
-      catch (Exception ex)
-      {
-        return $"<Exception:{ex.GetType().Name}>";
-      }
-    }
-
-    private static async Task<(string, string)> SafeInvokeTupleAsync(Func<Task<(string, string)>> resolver)
-    {
-      if (resolver == null)
-        return (string.Empty, string.Empty);
-
-      try
-      {
-        var result = await resolver().ConfigureAwait(true);
-        return (result.Item1 ?? string.Empty, result.Item2 ?? string.Empty);
-      }
-      catch (COMException ex)
-      {
-        var marker = $"<COMException:{ex.ErrorCode:X8}>";
-        return (marker, marker);
-      }
-      catch (Exception ex)
-      {
-        var marker = $"<Exception:{ex.GetType().Name}>";
-        return (marker, marker);
-      }
-    }
-
-    private static WorkingDirectoryCandidate SelectBestCandidate(List<WorkingDirectoryCandidate> candidates)
-    {
-      if (candidates == null || candidates.Count == 0)
-        return null;
-
-      bool OutsideExtension(WorkingDirectoryCandidate candidate)
-        => !string.IsNullOrEmpty(candidate.Path) && !candidate.IsInsideExtension;
-
-      bool Exists(WorkingDirectoryCandidate candidate)
-        => !string.IsNullOrEmpty(candidate.Path) && candidate.Exists;
-
-      WorkingDirectoryCandidate Pick(Func<WorkingDirectoryCandidate, bool> predicate)
-      {
-        var outside = candidates.FirstOrDefault(c => predicate(c) && OutsideExtension(c));
-        if (outside != null)
-          return outside;
-
-        return candidates.FirstOrDefault(predicate);
-      }
-
-      var workspaceCandidate = Pick(c => Exists(c) && c.IsWorkspaceRoot);
-      if (workspaceCandidate != null)
-        return workspaceCandidate;
-
-      var solutionSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-      {
-        "SolutionReadyHint",
-        "IVsSolution.GetSolutionInfo.Directory",
-        "IVsSolution.VSPROPID_SolutionDirectory",
-        "IVsSolution.GetSolutionInfo.FileDir",
-        "IVsSolution.GetSolutionRootDirectory",
-        "DTE.Solution.FullName",
-        "DTE.Solution.FileName",
-        "DTE.Solution.Properties.Path",
-        "VS.Solutions.Current.FullPath"
-      };
-
-      var solutionCandidate = Pick(c => Exists(c) && solutionSources.Contains(c.Source));
-      if (solutionCandidate != null)
-        return solutionCandidate;
-
-      var selectionCandidate = Pick(c => Exists(c) && (c.Source.StartsWith("VS.Solutions.ActiveItem", StringComparison.OrdinalIgnoreCase) || string.Equals(c.Source, "VS.Solutions.ActiveProject", StringComparison.OrdinalIgnoreCase)));
-      if (selectionCandidate != null)
-        return selectionCandidate;
-
-      var activeDocumentCandidate = Pick(c => Exists(c) && string.Equals(c.Source, "DTE.ActiveDocument", StringComparison.OrdinalIgnoreCase));
-      if (activeDocumentCandidate != null)
-        return activeDocumentCandidate;
-
-      var existingOutside = candidates.FirstOrDefault(c => Exists(c) && OutsideExtension(c));
-      if (existingOutside != null)
-        return existingOutside;
-
-      var existing = candidates.FirstOrDefault(Exists);
-      if (existing != null)
-        return existing;
-
-      return candidates.FirstOrDefault(c => !string.IsNullOrEmpty(c.Path));
-    }
-
-    private static int CalculatePathDepth(string path)
-    {
-      if (string.IsNullOrEmpty(path))
-        return -1;
-
-      return path.Count(ch => ch == Path.DirectorySeparatorChar || ch == Path.AltDirectorySeparatorChar);
-    }
-
-    private static bool DirectoryContainsFiles(string directory, params string[] patterns)
-    {
-      if (string.IsNullOrEmpty(directory) || patterns == null || patterns.Length == 0)
-        return false;
-
-      try
-      {
-        foreach (var pattern in patterns)
-        {
-          if (Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly).Any())
-            return true;
-        }
-      }
-      catch
-      {
-        // ignore IO issues
-      }
-
-      return false;
-    }
-
-    private static string GetActiveSolutionFullName(DTE2 dte)
-    {
-      try { return dte?.Solution?.FullName ?? string.Empty; }
-      catch { return string.Empty; }
-    }
-
-    private static string GetActiveSolutionFileName(DTE2 dte)
-    {
-      try { return dte?.Solution?.FileName ?? string.Empty; }
-      catch { return string.Empty; }
-    }
-
-    private static string GetActiveDocumentDirectory(DTE2 dte)
-    {
-      try
-      {
-        var fullName = dte?.ActiveDocument?.FullName;
-        if (string.IsNullOrWhiteSpace(fullName))
-          return string.Empty;
-
-        if (Directory.Exists(fullName))
-          return NormalizeDirectory(fullName);
-
-        if (File.Exists(fullName))
-          return NormalizeDirectory(Path.GetDirectoryName(fullName) ?? string.Empty);
-
-        return NormalizeDirectory(Path.GetDirectoryName(fullName) ?? string.Empty);
-      }
-      catch
-      {
-        return string.Empty;
-      }
-    }
-
-    private static async Task<SolutionItem> SafeGetCurrentSolutionAsync()
-    {
-      try
-      {
-        return await VS.Solutions.GetCurrentSolutionAsync();
-      }
-      catch
-      {
-        return null;
-      }
-    }
-
-    private static async Task<SolutionItem> GetActiveProjectAsync()
-    {
-      try
-      {
-        var items = await VS.Solutions.GetActiveItemsAsync();
-        if (items != null)
-        {
-          foreach (var item in items)
-          {
-            if (item == null)
-              continue;
-
-            if (item.Type == SolutionItemType.Project || item.Type == SolutionItemType.PhysicalFolder || item.Type == SolutionItemType.Solution)
-              return item;
-          }
-        }
-      }
-      catch
-      {
-      }
-
-      return null;
-    }
-
-    private static async Task<IReadOnlyList<SolutionItem>> GetActiveSolutionItemsAsync()
-    {
-      try
-      {
-        var items = await VS.Solutions.GetActiveItemsAsync();
-        var list = items?.ToList();
-        return list != null && list.Count > 0 ? list : Array.Empty<SolutionItem>();
-      }
-      catch
-      {
-        return Array.Empty<SolutionItem>();
-      }
-    }
-
-    private static string GetSolutionItemPath(SolutionItem item)
-    {
-      if (item == null)
-        return string.Empty;
-
-      var path = TryGetSolutionItemFullPath(item);
-      if (!string.IsNullOrEmpty(path))
-        return GetDirectoryFromFile(path);
-
-      var parent = TryGetSolutionItemParent(item);
-      while (parent != null)
-      {
-        path = TryGetSolutionItemFullPath(parent);
-        if (!string.IsNullOrEmpty(path))
-          return GetDirectoryFromFile(path);
-        parent = TryGetSolutionItemParent(parent);
-      }
-
-      foreach (var child in TryGetSolutionItemChildren(item))
-      {
-        path = TryGetSolutionItemFullPath(child);
-        if (!string.IsNullOrEmpty(path))
-          return GetDirectoryFromFile(path);
-      }
-
-      return string.Empty;
-    }
-
-    private static string TryGetSolutionItemFullPath(SolutionItem item)
-    {
-      if (item == null)
-        return string.Empty;
-
-      try
-      {
-        var value = item.FullPath;
-        if (!string.IsNullOrWhiteSpace(value))
-          return value;
-      }
-      catch
-      {
-      }
-
-      try
-      {
-        var type = item.GetType();
-        var prop = type.GetProperty("FullPath", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (prop?.GetValue(item) is string alt && !string.IsNullOrWhiteSpace(alt))
-          return alt;
-
-        var physicalProp = type.GetProperty("PhysicalPath", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (physicalProp?.GetValue(item) is string physical && !string.IsNullOrWhiteSpace(physical))
-          return physical;
-      }
-      catch
-      {
-      }
-
-      return string.Empty;
-    }
-
-    private static SolutionItem TryGetSolutionItemParent(SolutionItem item)
-    {
-      if (item == null)
-        return null;
-
-      try { return item.Parent; }
-      catch { }
-
-      try
-      {
-        var prop = item.GetType().GetProperty("Parent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (prop?.GetValue(item) is SolutionItem parent)
-          return parent;
-      }
-      catch
-      {
-      }
-
-      return null;
-    }
-
-    private static IEnumerable<SolutionItem> TryGetSolutionItemChildren(SolutionItem item)
-    {
-      if (item == null)
-        return Array.Empty<SolutionItem>();
-
-      var results = new List<SolutionItem>();
-      try
-      {
-        var childrenProp = item.GetType().GetProperty("Children", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (childrenProp != null && childrenProp.GetValue(item) is IEnumerable enumerable)
-        {
-          foreach (var childObj in enumerable)
-          {
-            if (childObj is SolutionItem child && child != null)
-              results.Add(child);
-          }
-        }
-      }
-      catch
-      {
-      }
-
-      return results.Count > 0 ? results : Array.Empty<SolutionItem>();
-    }
-
-    private static void AddProjectDirectoryCandidates(List<CandidateSeed> list, DTE2 dte)
-    {
-      if (list == null)
-        return;
-
-      var index = 0;
-      foreach (var (name, path) in EnumerateSolutionProjectDirectories(dte))
-      {
-        var localPath = path;
-        var label = string.IsNullOrEmpty(name) ? $"DTE.Project[{index++}]" : $"DTE.Project:{name}";
-        TryAddCandidate(list, label, () => localPath);
-      }
-    }
-
-    private static IEnumerable<(string Name, string Path)> EnumerateSolutionProjectDirectories(DTE2 dte)
-    {
-      if (dte?.Solution == null)
-        yield break;
-
-      foreach (var project in EnumerateProjects(dte.Solution))
-      {
-        var path = GetProjectDirectory(project);
-        if (!string.IsNullOrEmpty(path))
-          yield return (SafeGetProjectName(project), path);
-      }
-    }
-
-    private static IEnumerable<DteProject> EnumerateProjects(DteSolution solution)
-    {
-      if (solution == null)
-        yield break;
-
-      DteProjects projects = null;
-      try { projects = solution.Projects; }
-      catch { }
-
-      if (projects == null)
-        yield break;
-
-      foreach (DteProject project in projects)
-      {
-        if (project == null)
-          continue;
-
-        yield return project;
-
-        foreach (var nested in EnumerateSubProjects(project))
-          yield return nested;
-      }
-    }
-
-    private static IEnumerable<DteProject> EnumerateSubProjects(DteProject project)
-    {
-      if (project == null)
-        yield break;
-
-      DteProjectItems items = null;
-      try { items = project.ProjectItems; }
-      catch { }
-
-      if (items == null)
-        yield break;
-
-      foreach (DteProjectItem item in items)
-      {
-        DteProject subProject = null;
-        try { subProject = item.SubProject; }
-        catch { }
-
-        if (subProject != null)
-        {
-          yield return subProject;
-
-          foreach (var nested in EnumerateSubProjects(subProject))
-            yield return nested;
-        }
-      }
-    }
-
-    private static string GetProjectDirectory(DteProject project)
-    {
-      if (project == null)
-        return string.Empty;
-
-      try
-      {
-        var fullName = project.FullName;
-        if (!string.IsNullOrWhiteSpace(fullName))
-        {
-          if (Directory.Exists(fullName))
-            return NormalizeDirectory(fullName);
-
-          if (File.Exists(fullName))
-            return NormalizeDirectory(Path.GetDirectoryName(fullName) ?? string.Empty);
-        }
-      }
-      catch
-      {
-      }
-
-      foreach (var propertyName in new[] { "FullPath", "ProjectHome", "ProjectDir" })
-      {
-        var candidate = GetProjectProperty(project, propertyName);
-        if (!string.IsNullOrWhiteSpace(candidate))
-          return NormalizeDirectory(candidate);
-      }
-
-      return string.Empty;
-    }
-
-    private static string GetProjectProperty(DteProject project, string propertyName)
-    {
-      if (project?.Properties == null || string.IsNullOrEmpty(propertyName))
-        return string.Empty;
-
-      try
-      {
-        var property = project.Properties.Item(propertyName);
-        if (property?.Value is string value && !string.IsNullOrWhiteSpace(value))
-          return value;
-      }
-      catch (ArgumentException)
-      {
-        // property not available
-      }
-      catch (COMException)
-      {
-      }
-      catch
-      {
-      }
-
-      return string.Empty;
-    }
-
-    private static string SafeGetProjectName(DteProject project)
-    {
-      try { return project?.Name ?? string.Empty; }
-      catch { return string.Empty; }
-    }
-
-    private async Task<string> GetSolutionRootDirectoryAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var solutionService = await GetSolutionServiceAsync();
-      var root = TryInvokeSolutionRootDirectory(solutionService);
-      if (!string.IsNullOrEmpty(root))
-        return NormalizeDirectory(root);
-
-      return string.Empty;
-    }
-
-    private static string TryInvokeSolutionRootDirectory(IVsSolution solutionService)
-    {
-      if (solutionService == null)
-        return string.Empty;
-
-      try
-      {
-        var method = solutionService.GetType().GetMethod("GetSolutionRootDirectory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(string).MakeByRefType() }, null);
-        if (method != null)
-        {
-          var args = new object[] { string.Empty };
-          var result = method.Invoke(solutionService, args);
-          if (result is int hr && ErrorHandler.Succeeded(hr))
-          {
-            if (args[0] is string dir && !string.IsNullOrWhiteSpace(dir))
-              return NormalizeDirectory(dir);
-          }
-        }
-      }
-      catch (TargetInvocationException tie) when (tie.InnerException is COMException)
-      {
-        // ignore COM failures
-      }
-      catch
-      {
-      }
-
-      return string.Empty;
-    }
-
-    internal static async Task<EnvironmentSnapshot> CaptureEnvironmentSnapshotAsync(CancellationToken ct)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
-      var solutionRoot = TryGetSolutionRootDirectory();
-      var workspaceRoot = TryGetFolderWorkspaceRootSynced();
-      return new EnvironmentSnapshot(solutionRoot, workspaceRoot);
-    }
-
-    private static string TryGetSolutionRootDirectory()
-    {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      if (ServiceProvider.GlobalProvider.GetService(typeof(SVsSolution)) is IVsSolution solution &&
-          ErrorHandler.Succeeded(solution.GetSolutionInfo(out var dir, out _, out _)) &&
-          !string.IsNullOrWhiteSpace(dir))
-      {
-        return NormalizeDirectory(dir);
-      }
-
-      return string.Empty;
-    }
-
-    private static string TryGetFolderWorkspaceRootSynced()
-    {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      try
-      {
-        static Type ResolveWorkspaceServiceType()
-        {
-          return Type.GetType("Microsoft.VisualStudio.Workspace.VSIntegration.Contracts.SVsFolderWorkspaceService, Microsoft.VisualStudio.Workspace.VSIntegration.Contracts", throwOnError: false)
-                 ?? Type.GetType("Microsoft.VisualStudio.Workspace.VSIntegration.SVsFolderWorkspaceService, Microsoft.VisualStudio.Workspace.VSIntegration", throwOnError: false);
-        }
-
-        var serviceType = ResolveWorkspaceServiceType();
-        if (serviceType == null)
-          return string.Empty;
-
-        var service = ServiceProvider.GlobalProvider?.GetService(serviceType);
-        if (service == null)
-          return string.Empty;
-
-        var currentWorkspaceProp = service.GetType().GetProperty("CurrentWorkspace", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        var currentWorkspace = currentWorkspaceProp?.GetValue(service);
-        if (currentWorkspace == null)
-          return string.Empty;
-
-        var locationProp = currentWorkspace.GetType().GetProperty("Location", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (locationProp?.GetValue(currentWorkspace) is string location && !string.IsNullOrWhiteSpace(location))
-          return NormalizeDirectory(location);
-
-        var rootProp = currentWorkspace.GetType().GetProperty("Root", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        if (rootProp?.GetValue(currentWorkspace) is string root && !string.IsNullOrWhiteSpace(root))
-          return NormalizeDirectory(root);
-      }
-      catch
-      {
-      }
-
-      return string.Empty;
-    }
-
-    private static async Task<string> GetFolderWorkspaceRootAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      return TryGetFolderWorkspaceRootSynced();
-    }
-
-    internal static UIContext TryGetFolderOpenUIContext()
-    {
-      var prop = typeof(KnownUIContexts).GetProperty("FolderOpenContext", BindingFlags.Public | BindingFlags.Static);
-      if (prop?.GetValue(null) is UIContext contextFromProperty)
-        return contextFromProperty;
-
-      var candidateFieldNames = new[] { "FolderView", "FolderOpen", "OpenFolder" };
-      foreach (var fieldName in candidateFieldNames)
-      {
-        var field = typeof(UIContextGuids80).GetField(fieldName, BindingFlags.Public | BindingFlags.Static);
-        if (field?.GetValue(null) is string guidString && Guid.TryParse(guidString, out var guid))
-          return UIContext.FromUIContextGuid(guid);
-      }
-
-      return null;
-    }
-
-    private string GetFolderWorkspaceLocation()
-    {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      return TryGetFolderWorkspaceRootSynced();
-    }
-
-    private static string GetDteSolutionProperty(DTE2 dte, string propertyName)
-    {
-      if (dte?.Solution?.Properties == null || string.IsNullOrWhiteSpace(propertyName))
-        return string.Empty;
-
-      try
-      {
-        foreach (Property property in dte.Solution.Properties)
-        {
-          if (property == null)
-            continue;
-
-          string name = null;
-          try
-          {
-            name = property.Name;
-          }
-          catch (COMException)
-          {
-            continue;
-          }
-          catch (Exception)
-          {
-            continue;
-          }
-
-          if (!string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase))
-            continue;
-
-          try
-          {
-            if (property.Value is string value && !string.IsNullOrWhiteSpace(value))
-              return value;
-          }
-          catch (COMException)
-          {
-            continue;
-          }
-          catch (Exception)
-          {
-            continue;
-          }
-        }
-      }
-      catch
-      {
-        // ignore COM exceptions and fall back
-      }
-
-      return string.Empty;
-    }
-
-    private async Task AdviseSolutionEventsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      await SubscribeUiContextsAsync();
-
-      if (_solutionEvents != null)
-        return;
-
-      var solutionService = await GetSolutionServiceAsync();
-      if (solutionService == null)
-        return;
-
-      var sink = new SolutionEventsSink(this);
-      if (ErrorHandler.Succeeded(solutionService.AdviseSolutionEvents(sink, out var cookie)))
-      {
-        _solutionEvents = sink;
-        _solutionEventsCookie = cookie;
-        OnSolutionContextChanged("solution-events-advise");
-      }
-    }
-
-    private async Task UnadviseSolutionEventsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (_solutionService != null && _solutionEventsCookie != 0)
-      {
-        try
-        {
-          _solutionService.UnadviseSolutionEvents(_solutionEventsCookie);
-        }
-        catch
-        {
-          // ignore
-        }
-        _solutionEventsCookie = 0;
-      }
-
-      _solutionEvents = null;
-      if (_solutionService != null)
-      {
-        _solutionService = null;
-      }
-    }
-
-    private async Task SubscribeUiContextsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (_solutionLoadedContext == null)
-      {
-        _solutionLoadedContext = KnownUIContexts.SolutionExistsAndFullyLoadedContext;
-        _solutionLoadedContext.UIContextChanged += OnSolutionLoadedContextChanged;
-        if (_solutionLoadedContext.IsActive)
-          _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnSolutionFullyLoadedAsync);
-      }
-
-      if (_folderOpenContext == null)
-      {
-        _folderOpenContext = TryGetFolderOpenUIContext();
-        if (_folderOpenContext != null)
-        {
-          _folderOpenContext.UIContextChanged += OnFolderContextChanged;
-          if (_folderOpenContext.IsActive && (_solutionLoadedContext == null || !_solutionLoadedContext.IsActive))
-            _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnFolderWorkspaceReadyAsync);
-        }
-      }
-    }
-
-    private async Task UnsubscribeUiContextsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (_solutionLoadedContext != null)
-      {
-        _solutionLoadedContext.UIContextChanged -= OnSolutionLoadedContextChanged;
-        _solutionLoadedContext = null;
-      }
-
-      if (_folderOpenContext != null)
-      {
-        _folderOpenContext.UIContextChanged -= OnFolderContextChanged;
-        _folderOpenContext = null;
-      }
-    }
-
-    private void OnSolutionContextChanged(string reason)
-    {
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await EnsureWorkingDirectoryUpToDateAsync(reason));
-    }
-
-    private async Task EnsureWorkingDirectoryUpToDateAsync(string reason)
-    {
-      await _workingDirLock.WaitAsync();
-      try
-      {
-        var resolution = await ResolveWorkingDirectoryAsync();
-        var newPath = resolution?.Selected?.Path ?? string.Empty;
-        if (string.IsNullOrEmpty(newPath) || PathsEqual(newPath, _workingDir))
-          return;
-
-        var previous = _workingDir;
-        _workingDir = newPath;
-        await LogWorkingDirectoryResolutionAsync(reason, resolution, previous, includeCandidates: true);
-
-        if (_host == null || !_cliStarted)
-          return;
-
-        await UpdateAuthenticationStateAsync(_authKnown, _isAuthenticated, "Switching Codex to current solution...", true);
-        var restarted = await RestartCliAsync();
-        if (!restarted)
-        {
-          await UpdateAuthenticationStateAsync(true, false, "Failed to restart Codex CLI after solution change. Check Diagnostics.", false);
-          return;
-        }
-
-        var options = _options ?? new CodexOptions();
-        var auth = await _host.CheckAuthenticationAsync(options, _workingDir);
-        await HandleAuthenticationResultAsync(auth);
-      }
-      finally
-      {
-        _workingDirLock.Release();
-      }
-    }
-
-    private async Task OnSolutionReadyAsync(string path)
-    {
-      var normalized = NormalizeDirectory(path);
-      if (string.IsNullOrEmpty(normalized) || IsInsideExtensionRoot(normalized))
-        return;
-
-      _waitingForSolutionLoad = false;
-      _lastKnownSolutionRoot = normalized;
-      _lastKnownWorkspaceRoot = string.Empty;
-
-      await EnsureWorkingDirectoryUpToDateAsync("solution-ready");
-    }
-
-    private async Task OnWorkspaceReadyAsync(string path)
-    {
-      var normalized = NormalizeDirectory(path);
-      if (string.IsNullOrEmpty(normalized) || IsInsideExtensionRoot(normalized))
-        return;
-
-      _lastKnownWorkspaceRoot = normalized;
-      _lastKnownSolutionRoot = string.Empty;
-
-      if (_solutionLoadedContext != null && _solutionLoadedContext.IsActive)
-        return;
-
-      await EnsureWorkingDirectoryUpToDateAsync("workspace-ready");
-    }
-
-    private void OnSolutionEventsSolutionOpened()
-    {
-      _waitingForSolutionLoad = true;
-      _lastKnownWorkspaceRoot = string.Empty;
-
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        if (_solutionLoadedContext != null && _solutionLoadedContext.IsActive)
-          await OnSolutionFullyLoadedAsync();
-      });
-    }
-
-    private void OnSolutionClosed()
-    {
-      _waitingForSolutionLoad = false;
-      _lastKnownSolutionRoot = string.Empty;
-
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        if (_folderOpenContext != null && _folderOpenContext.IsActive)
-          await OnFolderWorkspaceReadyAsync();
-        else
-          await EnsureWorkingDirectoryUpToDateAsync("solution-closed");
-      });
-    }
-
-    private async Task OnSolutionFullyLoadedAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var (directory, file) = await GetSolutionInfoAsync();
-      var candidate = !string.IsNullOrEmpty(directory) ? directory : GetDirectoryFromFile(file);
-      if (string.IsNullOrEmpty(candidate))
-      {
-        var solutionItem = await SafeGetCurrentSolutionAsync();
-        candidate = GetSolutionItemPath(solutionItem);
-      }
-
-      await OnSolutionReadyAsync(candidate);
-    }
-
-    private async Task OnFolderWorkspaceReadyAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      var location = GetFolderWorkspaceLocation();
-      await OnWorkspaceReadyAsync(location);
-    }
-
-    private void OnSolutionLoadedContextChanged(object sender, UIContextChangedEventArgs e)
-    {
-      if (e.Activated)
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnSolutionFullyLoadedAsync);
-    }
-
-    private void OnFolderContextChanged(object sender, UIContextChangedEventArgs e)
-    {
-      if (!e.Activated)
-        return;
-
-      if (_solutionLoadedContext != null && _solutionLoadedContext.IsActive)
-        return;
-
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnFolderWorkspaceReadyAsync);
-    }
-
-    private async Task CleanupSolutionSubscriptionsAsync()
-    {
-      await UnadviseSolutionEventsAsync();
-      await UnsubscribeUiContextsAsync();
-    }
-
-    private sealed class SolutionEventsSink : IVsSolutionEvents
-    {
-      private readonly WeakReference<MyToolWindowControl> _owner;
-
-      public SolutionEventsSink(MyToolWindowControl owner)
-      {
-        _owner = new WeakReference<MyToolWindowControl>(owner);
-      }
-
-      private void Notify(string reason, Action<MyToolWindowControl> callback = null)
-      {
-        if (_owner.TryGetTarget(out var control))
-        {
-          control.OnSolutionContextChanged(reason);
-          callback?.Invoke(control);
-        }
-      }
-
-      public int OnAfterOpenProject(IVsHierarchy pHierarchy, int fAdded)
-      {
-        if (fAdded != 0)
-          Notify("project-opened");
-        return VSConstants.S_OK;
-      }
-
-      public int OnAfterCloseProject(IVsHierarchy pHierarchy, int fRemoved)
-      {
-        if (fRemoved != 0)
-          Notify("project-closed");
-        return VSConstants.S_OK;
-      }
-
-      public int OnQueryCloseProject(IVsHierarchy pHierarchy, int fRemoving, ref int pfCancel) => VSConstants.S_OK;
-
-      public int OnBeforeCloseProject(IVsHierarchy pHierarchy, int fRemoved) => VSConstants.S_OK;
-
-      public int OnAfterLoadProject(IVsHierarchy pStubHierarchy, IVsHierarchy pRealHierarchy)
-      {
-        Notify("project-loaded");
-        return VSConstants.S_OK;
-      }
-
-      public int OnQueryUnloadProject(IVsHierarchy pRealHierarchy, ref int pfCancel) => VSConstants.S_OK;
-
-      public int OnBeforeUnloadProject(IVsHierarchy pRealHierarchy, IVsHierarchy pStubHierarchy)
-      {
-        Notify("project-unload");
-        return VSConstants.S_OK;
-      }
-
-      public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution)
-      {
-        Notify("solution-opened", control => control.OnSolutionEventsSolutionOpened());
-        return VSConstants.S_OK;
-      }
-
-      public int OnBeforeCloseSolution(object pUnkReserved) => VSConstants.S_OK;
-
-      public int OnAfterCloseSolution(object pUnkReserved)
-      {
-        Notify("solution-closed", control => control.OnSolutionClosed());
-        return VSConstants.S_OK;
-      }
-
-      public int OnQueryCloseSolution(object pUnkReserved, ref int pfCancel) => VSConstants.S_OK;
-    }
-
-    private static string TryGetString(JObject obj, params string[] names)
-    {
-      if (obj == null || names == null || names.Length == 0)
-        return null;
-
-      foreach (var name in names)
-      {
-        if (string.IsNullOrEmpty(name))
-          continue;
-
-        try
-        {
-          if (!obj.TryGetValue(name, out var token) || token == null || token.Type == JTokenType.Null)
-            continue;
-
-          var value = token.Type == JTokenType.String
-            ? token.Value<string>()
-            : token.ToString(Formatting.None);
-
-          if (!string.IsNullOrWhiteSpace(value))
-            return value;
-        }
-        catch
-        {
-          // ignore malformed tokens
-        }
-      }
-
-      return null;
-    }
-
-    private static int? TryGetInt(JObject obj, params string[] names)
-    {
-      if (obj == null || names == null)
-        return null;
-
-      foreach (var name in names)
-      {
-        if (string.IsNullOrEmpty(name))
-          continue;
-
-        var token = obj[name];
-        if (TryReadInt(token, out var value))
-          return value;
-
-        var text = token?.ToString();
-        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
-          return value;
-      }
-
-      return null;
-    }
-
-    private static bool? TryGetBoolean(JObject obj, params string[] names)
-    {
-      if (obj == null || names == null)
-        return null;
-
-      foreach (var name in names)
-      {
-        if (string.IsNullOrEmpty(name))
-          continue;
-
-        var token = obj[name];
-        if (token == null)
-          continue;
-
-        if (token.Type == JTokenType.Boolean)
-          return token.Value<bool>();
-
-        if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
-          return Math.Abs(token.Value<double>()) > double.Epsilon;
-
-        var text = token.ToString().Trim();
-        if (bool.TryParse(text, out var boolean))
-          return boolean;
-
-        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
-          return numeric != 0;
-
-        if (string.Equals(text, "success", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(text, "completed", StringComparison.OrdinalIgnoreCase))
-          return true;
-
-        if (string.Equals(text, "failed", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(text, "error", StringComparison.OrdinalIgnoreCase))
-          return false;
-      }
-
-      return null;
-    }
-
-    private void ConfigureHeartbeat(EventMsg evt)
-    {
-      var state = ExtractHeartbeatState(evt.Raw);
-      if (state == null)
-      {
-        StopHeartbeatTimer();
-        return;
-      }
-
-      var needsRestart = true;
-      lock (_heartbeatLock)
-      {
-        if (_heartbeatTimer != null && _heartbeatState != null)
-        {
-          var sameInterval = Math.Abs((_heartbeatState.Interval - state.Interval).TotalMilliseconds) < 1;
-          var sameOp = string.Equals(_heartbeatState.OpType, state.OpType, StringComparison.OrdinalIgnoreCase);
-          if (sameInterval && sameOp)
-          {
-            _heartbeatState = state;
-            needsRestart = false;
-          }
-        }
-      }
-
-      if (!needsRestart)
-        return;
-
-      StartHeartbeatTimer(state);
-    }
-
-    private void StartHeartbeatTimer(HeartbeatState state)
-    {
-      if (state == null || state.OpTemplate == null)
-        return;
-
-      Timer oldTimer = null;
-      HeartbeatState previousState = null;
-      var intervalMs = (int)Math.Max(1, Math.Min(int.MaxValue, state.Interval.TotalMilliseconds));
-
-      lock (_heartbeatLock)
-      {
-        oldTimer = _heartbeatTimer;
-        previousState = _heartbeatState;
-        _heartbeatState = state;
-        _heartbeatTimer = new Timer(OnHeartbeatTimer, null, intervalMs, intervalMs);
-      }
-
-      oldTimer?.Dispose();
-
-      var stateChanged = previousState == null
-        || Math.Abs((previousState.Interval - state.Interval).TotalMilliseconds) >= 1
-        || !string.Equals(previousState.OpType, state.OpType, StringComparison.OrdinalIgnoreCase);
-
-      if (stateChanged)
-      {
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-        {
-          try
-          {
-            var pane = await DiagnosticsPane.GetAsync();
-            await pane.WriteLineAsync(
-              $"[info] Heartbeat enabled (interval={state.Interval.TotalSeconds:F1}s, op={state.OpType})");
-          }
-          catch
-          {
-          }
-        });
-      }
-    }
-
-    private void StopHeartbeatTimer()
-    {
-      Timer timerToDispose = null;
-      var hadState = false;
-
-      lock (_heartbeatLock)
-      {
-        if (_heartbeatTimer != null)
-        {
-          timerToDispose = _heartbeatTimer;
-          _heartbeatTimer = null;
-        }
-
-        if (_heartbeatState != null)
-        {
-          hadState = true;
-          _heartbeatState = null;
-        }
-      }
-
-      timerToDispose?.Dispose();
-      Interlocked.Exchange(ref _heartbeatSending, 0);
-
-      if (hadState)
-      {
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-        {
-          try
-          {
-            var pane = await DiagnosticsPane.GetAsync();
-            await pane.WriteLineAsync("[info] Heartbeat disabled");
-          }
-          catch
-          {
-          }
-        });
-      }
-    }
-
-    private void OnHeartbeatTimer(object state)
-    {
-      if (Interlocked.Exchange(ref _heartbeatSending, 1) == 1)
-        return;
-
-      HeartbeatState snapshot;
-      lock (_heartbeatLock)
-      {
-        snapshot = _heartbeatState;
-      }
-
-      var host = _host;
-
-      if (snapshot == null || host == null)
-      {
-        Interlocked.Exchange(ref _heartbeatSending, 0);
-        return;
-      }
-
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-      {
-        try
-        {
-          await SendHeartbeatAsync(host, snapshot);
-        }
-        finally
-        {
-          Interlocked.Exchange(ref _heartbeatSending, 0);
-        }
-      });
-    }
-
-    private async Task SendHeartbeatAsync(CodexCliHost host, HeartbeatState state)
-    {
-      try
-      {
-        var submission = CreateHeartbeatSubmission(state.OpTemplate);
-        if (string.IsNullOrEmpty(submission))
-          return;
-
-        var ok = await host.SendAsync(submission);
-        if (!ok)
-        {
-          var pane = await DiagnosticsPane.GetAsync();
-          await pane.WriteLineAsync("[warn] Heartbeat send failed (SendAsync returned false).");
-        }
-      }
-      catch (ObjectDisposedException)
-      {
-        StopHeartbeatTimer();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[warn] Heartbeat send error: {ex.Message}");
-      }
-    }
-
-    private static string CreateHeartbeatSubmission(JObject opTemplate)
-    {
-      if (opTemplate == null)
-        return string.Empty;
-
-      var op = opTemplate.DeepClone() as JObject;
-      if (op == null)
-        return string.Empty;
-
-      var type = TryGetString(op, "type");
-      if (string.IsNullOrWhiteSpace(type))
-        return string.Empty;
-
-      var submission = new JObject
-      {
-        ["id"] = Guid.NewGuid().ToString(),
-        ["op"] = op
-      };
-
-      return submission.ToString(Formatting.None);
-    }
-
-    private static HeartbeatState ExtractHeartbeatState(JObject raw)
-    {
-      if (raw == null)
-        return null;
-
-      var heartbeatToken = FindHeartbeatToken(raw);
-      var intervalMs = ExtractHeartbeatIntervalMs(raw, heartbeatToken);
-      if (intervalMs <= 0)
-        return null;
-
-      var opTemplate = BuildHeartbeatOpTemplate(raw, heartbeatToken);
-      if (opTemplate == null)
-        return null;
-
-      var opType = TryGetString(opTemplate, "type");
-      if (string.IsNullOrWhiteSpace(opType))
-        return null;
-
-      var interval = TimeSpan.FromMilliseconds(Math.Max(intervalMs, 1000));
-      return new HeartbeatState(interval, opTemplate, opType);
-    }
-
-    private static JToken FindHeartbeatToken(JObject root)
-    {
-      if (root == null)
-        return null;
-
-      foreach (var path in new[]
-      {
-        "heartbeat",
-        "session.heartbeat",
-        "session.capabilities.heartbeat",
-        "session.protocol_features.heartbeat",
-        "capabilities.heartbeat",
-        "protocol_features.heartbeat",
-        "features.heartbeat",
-        "settings.heartbeat"
-      })
-      {
-        var token = SafeSelectToken(root, path);
-        if (token != null)
-          return token;
-      }
-
-      return null;
-    }
-
-    private static int ExtractHeartbeatIntervalMs(JObject root, JToken heartbeatToken)
-    {
-      if (heartbeatToken != null)
-      {
-        if (heartbeatToken.Type == JTokenType.Integer || heartbeatToken.Type == JTokenType.Float)
-        {
-          var direct = ValueAsInt(heartbeatToken);
-          if (direct > 0)
-            return direct;
-        }
-
-        if (heartbeatToken is JObject heartbeatObj)
-        {
-          foreach (var name in new[] { "interval_ms", "intervalMs", "interval" })
-          {
-            var value = ValueAsInt(heartbeatObj[name]);
-            if (value > 0)
-              return value;
-          }
-
-          if (heartbeatObj["config"] is JObject configObj)
-          {
-            foreach (var name in new[] { "interval_ms", "intervalMs" })
-            {
-              var value = ValueAsInt(configObj[name]);
-              if (value > 0)
-                return value;
-            }
-          }
-        }
-      }
-
-      foreach (var token in new[]
-      {
-        root,
-        root?["session"] as JObject
-      })
-      {
-        if (token == null)
-          continue;
-
-        foreach (var name in new[]
-        {
-          "heartbeat_interval_ms",
-          "heartbeatIntervalMs",
-          "keep_alive_ms",
-          "keepAliveMs",
-          "keepalive_ms"
-        })
-        {
-          var value = ValueAsInt(token[name]);
-          if (value > 0)
-            return value;
-        }
-      }
-
-      return 0;
-    }
-
-    private static JObject BuildHeartbeatOpTemplate(JObject root, JToken heartbeatToken)
-    {
-      JObject opTemplate = null;
-      if (heartbeatToken is JObject heartbeatObj)
-      {
-        if (heartbeatObj["op"] is JObject opObj)
-          opTemplate = opObj.DeepClone() as JObject;
-        else if (heartbeatObj["op_template"] is JObject opTemplateObj)
-          opTemplate = opTemplateObj.DeepClone() as JObject;
-        else if (heartbeatObj["opTemplate"] is JObject opTemplateCamel)
-          opTemplate = opTemplateCamel.DeepClone() as JObject;
-      }
-
-      if (opTemplate != null)
-      {
-        var type = TryGetString(opTemplate, "type");
-        if (string.IsNullOrWhiteSpace(type))
-        {
-          var fallback = ExtractOpTypeFromToken(heartbeatToken as JObject) ?? DetermineFallbackOpType(root);
-          if (string.IsNullOrWhiteSpace(fallback))
-            return null;
-          opTemplate["type"] = fallback;
-        }
-
-        return opTemplate;
-      }
-
-      var opType = ExtractOpTypeFromToken(heartbeatToken as JObject) ?? DetermineFallbackOpType(root);
-      if (string.IsNullOrWhiteSpace(opType))
-        return null;
-
-      return new JObject { ["type"] = opType };
-    }
-
-    private static string ExtractOpTypeFromToken(JObject token)
-    {
-      if (token == null)
-        return null;
-
-      var opType = TryGetString(token, "op_type") ?? TryGetString(token, "opType");
-      if (!string.IsNullOrWhiteSpace(opType))
-        return opType;
-
-      if (token["op"] is JObject op)
-      {
-        opType = TryGetString(op, "type");
-        if (!string.IsNullOrWhiteSpace(opType))
-          return opType;
-      }
-
-      return null;
-    }
-
-    private static string DetermineFallbackOpType(JObject root)
-    {
-      var supported = ExtractSupportedOps(root);
-      if (supported.Contains("heartbeat"))
-        return "heartbeat";
-      if (supported.Contains("noop"))
-        return "noop";
-      return null;
-    }
-
-    private static IReadOnlyCollection<string> ExtractSupportedOps(JObject root)
-    {
-      var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-      if (root == null)
-        return result;
-
-      foreach (var name in new[]
-      {
-        "supported_ops",
-        "supportedOps",
-        "supported_operations",
-        "supportedOperations",
-        "allowed_ops",
-        "allowedOps"
-      })
-      {
-        foreach (var token in FindTokensByName(root, name))
-        {
-          if (token == null)
-            continue;
-
-          if (token.Type == JTokenType.Array)
-          {
-            foreach (var item in token)
-            {
-              var value = item?.ToString();
-              if (!string.IsNullOrWhiteSpace(value))
-                result.Add(value.Trim());
-            }
-          }
-          else
-          {
-            var value = token.ToString();
-            if (!string.IsNullOrWhiteSpace(value))
-              result.Add(value.Trim());
-          }
-        }
-      }
-
-      return result;
-    }
-
-    private static IEnumerable<JToken> FindTokensByName(JToken token, string name)
-    {
-      if (token == null)
-        yield break;
-
-      if (token.Type == JTokenType.Object)
-      {
-        var obj = (JObject)token;
-        foreach (var property in obj.Properties())
-        {
-          if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
-            yield return property.Value;
-
-          foreach (var child in FindTokensByName(property.Value, name))
-            yield return child;
-        }
-      }
-      else if (token.Type == JTokenType.Array)
-      {
-        foreach (var item in (JArray)token)
-        {
-          foreach (var child in FindTokensByName(item, name))
-            yield return child;
-        }
-      }
-    }
-
-    private static JToken SafeSelectToken(JObject obj, string path)
-    {
-      try { return obj?.SelectToken(path, false); }
-      catch { return null; }
-    }
-
-    private static int ValueAsInt(JToken token)
-    {
-      if (token == null || token.Type == JTokenType.Null)
-        return 0;
-
-      if (token.Type == JTokenType.Integer)
-        return token.Value<int>();
-
-      if (token.Type == JTokenType.Float)
-        return (int)Math.Round(token.Value<double>());
-
-      var text = token.ToString();
-      if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-        return parsed;
-
-      return 0;
-    }
-
-    private string ResolveExecId(EventMsg evt)
-    {
-      var id = GetExecEventId(evt);
-      if (string.IsNullOrEmpty(id))
-        return string.Empty;
-
-      if (_execIdRemap.TryGetValue(id, out var mapped))
-        return mapped;
-
-      return id;
-    }
-
-    private static string GetExecEventId(EventMsg evt)
-    {
-      var callId = TryGetString(evt.Raw, "call_id");
-      if (!string.IsNullOrEmpty(callId))
-        return callId;
-      if (!string.IsNullOrEmpty(evt.Id))
-        return evt.Id;
-      return string.Empty;
-    }
-
-    private string RegisterExecFallbackId()
-    {
-      var id = Guid.NewGuid().ToString();
-      _execIdRemap[id] = id;
-      _lastExecFallbackId = id;
-      return id;
-    }
-
-    private static string ResolveToolCallId(EventMsg evt)
-    {
-      if (evt == null)
-        return string.Empty;
-
-      return TryGetString(evt.Raw, "call_id", "tool_call_id", "toolCallId", "id")
-        ?? evt.Id
-        ?? string.Empty;
-    }
-
-    private McpToolRun EnsureToolRun(string callId, string toolName, string server)
-    {
-      var key = string.IsNullOrEmpty(callId) ? Guid.NewGuid().ToString() : callId;
-
-      if (_mcpToolRunIndex.TryGetValue(key, out var existing))
-        return existing;
-
-      var run = new McpToolRun(key, toolName, server);
-      _mcpToolRunIndex[key] = run;
-      _mcpToolRuns.Insert(0, run);
-      TrimMcpToolRunsIfNeeded();
-      return run;
-    }
-
-    private void TrimMcpToolRunsIfNeeded()
-    {
-      while (_mcpToolRuns.Count > MaxMcpToolRuns)
-      {
-        var lastIndex = _mcpToolRuns.Count - 1;
-        var last = _mcpToolRuns[lastIndex];
-        _mcpToolRuns.RemoveAt(lastIndex);
-        if (last != null)
-          _mcpToolRunIndex.Remove(last.CallId);
-      }
-    }
-
-    private static string BuildExecHeader(string command, string cwd)
-    {
-      var hasCommand = !string.IsNullOrWhiteSpace(command);
-      var hasCwd = !string.IsNullOrWhiteSpace(cwd);
-
-      if (hasCommand && hasCwd)
-        return $"$ {command} (cwd: {cwd})";
-      if (hasCommand)
-        return $"$ {command}";
-      if (hasCwd)
-        return $"cwd: {cwd}";
-      return "$ exec";
-    }
-
-    private static (string display, string normalized) ExtractExecCommandInfo(JToken commandToken)
-    {
-      if (commandToken == null)
-        return (string.Empty, string.Empty);
-
-      if (commandToken.Type == JTokenType.Array)
-      {
-        var array = (JArray)commandToken;
-        var parts = array.Select(t => TrimQuotes(t?.ToString() ?? string.Empty)).Where(p => !string.IsNullOrEmpty(p)).ToList();
-        if (parts.Count == 0)
-          return (string.Empty, string.Empty);
-
-        if (parts.Count >= 3 && string.Equals(parts[1], "-lc", StringComparison.OrdinalIgnoreCase))
-        {
-          var script = parts[2];
-          return (script, script);
-        }
-
-        var joined = string.Join(" ", parts);
-        var tail = parts.LastOrDefault(p => !string.IsNullOrWhiteSpace(p)) ?? joined;
-        return (joined, tail);
-      }
-
-      if (commandToken.Type == JTokenType.Object)
-      {
-        return (commandToken.ToString(Formatting.None), string.Empty);
-      }
-
-      var text = TrimQuotes(commandToken.ToString());
-      return (text, text);
-    }
-
-    private static string TrimQuotes(string text)
-    {
-      if (string.IsNullOrEmpty(text))
-        return string.Empty;
-
-      var trimmed = text.Trim();
-      if (trimmed.Length >= 2)
-      {
-        var first = trimmed[0];
-        var last = trimmed[trimmed.Length - 1];
-        if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
-          return trimmed.Substring(1, trimmed.Length - 2);
-      }
-
-      return trimmed;
-    }
-
-    private static bool ShouldOfferRemember(string signature)
-      => !string.IsNullOrWhiteSpace(signature);
-
-    private void RememberExecDecision(string signature, bool approved)
-    {
-      if (string.IsNullOrWhiteSpace(signature))
-        return;
-      _rememberedExecApprovals[signature] = approved;
-    }
-
-    private void RememberPatchDecision(string signature, bool approved)
-    {
-      if (string.IsNullOrWhiteSpace(signature))
-        return;
-      _rememberedPatchApprovals[signature] = approved;
-    }
-
-    private void EnqueueApprovalRequest(ApprovalRequest request)
-    {
-      if (request == null)
-        return;
-      _approvalQueue.Enqueue(request);
-      if (_activeApproval == null)
-        ThreadHelper.JoinableTaskFactory.RunAsync(DisplayNextApprovalAsync);
-    }
-
-    private async Task DisplayNextApprovalAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      if (_activeApproval != null)
-        return;
-      if (_approvalQueue.Count == 0)
-      {
-        ShowApprovalBanner(null);
-        return;
-      }
-
-      _activeApproval = _approvalQueue.Dequeue();
-      ShowApprovalBanner(_activeApproval);
-    }
-
-    private void ShowApprovalBanner(ApprovalRequest request)
-    {
-      if (this.FindName("ApprovalPromptBanner") is not Border banner ||
-          this.FindName("ApprovalPromptText") is not TextBlock text ||
-          this.FindName("ApprovalRememberCheckBox") is not CheckBox remember ||
-          this.FindName("ApprovalApproveButton") is not Button approve ||
-          this.FindName("ApprovalDenyButton") is not Button deny)
-      {
-        return;
-      }
-
-      if (request == null)
-      {
-        banner.Visibility = Visibility.Collapsed;
-        remember.Visibility = Visibility.Collapsed;
-        remember.IsChecked = false;
-        approve.IsEnabled = false;
-        deny.IsEnabled = false;
-        return;
-      }
-
-      banner.Visibility = Visibility.Visible;
-      text.Text = request.Message;
-      remember.Visibility = request.CanRemember ? Visibility.Visible : Visibility.Collapsed;
-      remember.IsChecked = false;
-      approve.IsEnabled = true;
-      deny.IsEnabled = true;
-    }
-
-    private async Task ResolveActiveApprovalAsync(bool approved)
-    {
-      ApprovalRequest request;
-      bool rememberChecked = false;
-
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      request = _activeApproval;
-      if (request == null)
-        return;
-
-      if (this.FindName("ApprovalRememberCheckBox") is CheckBox rememberCheck)
-        rememberChecked = request.CanRemember && rememberCheck.IsChecked == true;
-
-      _activeApproval = null;
-      ShowApprovalBanner(null);
-
-      if (rememberChecked)
-      {
-        if (request.Kind == ApprovalKind.Exec)
-          RememberExecDecision(request.Signature, approved);
-        else
-          RememberPatchDecision(request.Signature, approved);
-      }
-
-      var host = _host;
-      if (host != null)
-      {
-        if (request.Kind == ApprovalKind.Exec)
-        {
-          await host.SendAsync(ApprovalSubmissionFactory.CreateExec(request.CallId, approved));
-          if (!approved)
-            await LogManualApprovalAsync("exec", request.Signature, approved);
-        }
-        else
-        {
-          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, approved));
-          if (approved)
-            await ApplySelectedDiffsAsync();
-          else
-            await LogManualApprovalAsync("patch", request.Signature, approved);
-          _lastPatchCallId = request.CallId ?? string.Empty;
-          _lastPatchSignature = request.Signature ?? string.Empty;
-        }
-      }
-
-      await DisplayNextApprovalAsync();
-    }
-
-    private void ClearApprovalState(bool hideBanner = true)
-    {
-      _approvalQueue.Clear();
-      _activeApproval = null;
-
-      if (!hideBanner)
-        return;
-
-      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-      {
-        try
-        {
-          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-          ShowApprovalBanner(null);
-        }
-        catch
-        {
-          // ignore if control already disposed
-        }
-      });
-    }
-
-    private bool TryResolveExecApproval(CodexOptions.ApprovalMode mode, string signature, out bool approved, out string reason)
-    {
-      approved = false;
-      reason = string.Empty;
-
-      if (mode == CodexOptions.ApprovalMode.Agent || mode == CodexOptions.ApprovalMode.AgentFullAccess)
-      {
-        approved = true;
-        reason = mode == CodexOptions.ApprovalMode.Agent ? "Agent mode" : "Agent full access";
-        if (!string.IsNullOrWhiteSpace(signature))
-          _rememberedExecApprovals[signature] = approved;
-        return true;
-      }
-
-      if (!string.IsNullOrWhiteSpace(signature) && _rememberedExecApprovals.TryGetValue(signature, out approved))
-      {
-        reason = "remembered";
-        return true;
-      }
-
-      return false;
-    }
-
-    private bool TryResolvePatchApproval(CodexOptions.ApprovalMode mode, string signature, out bool approved, out string reason)
-    {
-      approved = false;
-      reason = string.Empty;
-
-      if (mode == CodexOptions.ApprovalMode.AgentFullAccess)
-      {
-        approved = true;
-        reason = "Agent full access";
-        if (!string.IsNullOrWhiteSpace(signature))
-          _rememberedPatchApprovals[signature] = approved;
-        return true;
-      }
-
-      if (!string.IsNullOrWhiteSpace(signature) && _rememberedPatchApprovals.TryGetValue(signature, out approved))
-      {
-        reason = "remembered";
-        return true;
-      }
-
-      return false;
-    }
-
-    private static async Task LogAutoApprovalAsync(string kind, string signature, bool approved, string reason)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var decision = approved ? "approved" : "denied";
-        var signaturePart = string.IsNullOrWhiteSpace(signature) ? string.Empty : $" [{signature}]";
-        var reasonPart = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" via {reason}";
-        await pane.WriteLineAsync($"[info] Auto-{decision} {kind}{signaturePart}{reasonPart}");
-      }
-      catch
-      {
-        // diagnostics best effort
-      }
-    }
-
-    private static async Task LogManualApprovalAsync(string kind, string signature, bool approved)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var decision = approved ? "approved" : "denied";
-        var signaturePart = string.IsNullOrWhiteSpace(signature) ? string.Empty : $" [{signature}]";
-        await pane.WriteLineAsync($"[info] Manual-{decision} {kind}{signaturePart}");
-      }
-      catch
-      {
-        // diagnostics best effort
-      }
-    }
-
-    private static string BuildPatchSignature(JObject raw)
-    {
-      if (raw == null)
-        return string.Empty;
-
-      var summary = TryGetString(raw, "summary");
-      if (!string.IsNullOrWhiteSpace(summary))
-        return summary;
-
-      if (raw["files"] is JArray files && files.Count > 0)
-      {
-        var names = files
-          .Select(token => TrimQuotes(token?.ToString() ?? string.Empty))
-          .Where(s => !string.IsNullOrWhiteSpace(s));
-        var joined = string.Join("|", names);
-        if (!string.IsNullOrWhiteSpace(joined))
-          return joined;
-      }
-
-      return TryGetString(raw, "call_id") ?? string.Empty;
-    }
-
-    public sealed class DiffTreeItem : INotifyPropertyChanged
-    {
-      private readonly Action<DiffTreeItem> _onCheckChanged;
-      private bool? _isChecked = true;
-      private bool _isExpanded;
-      private bool _isUpdating;
-
-      public DiffTreeItem(string name, string relativePath, bool isDirectory, DiffDocument document, Action<DiffTreeItem> onCheckChanged)
-      {
-        Name = string.IsNullOrWhiteSpace(name) ? "(file)" : name;
-        RelativePath = relativePath ?? string.Empty;
-        IsDirectory = isDirectory;
-        Document = document;
-        _onCheckChanged = onCheckChanged;
-        Children = new ObservableCollection<DiffTreeItem>();
-        _isExpanded = isDirectory;
-      }
-
-      public event PropertyChangedEventHandler PropertyChanged;
-
-      public string Name { get; }
-      public string RelativePath { get; }
-      public bool IsDirectory { get; }
-      public DiffDocument Document { get; private set; }
-      public ObservableCollection<DiffTreeItem> Children { get; }
-      public DiffTreeItem Parent { get; private set; }
-
-      public bool? IsChecked
-      {
-        get => _isChecked;
-        set => SetIsChecked(value, updateChildren: true, updateParent: true);
-      }
-
-      public bool IsExpanded
-      {
-        get => _isExpanded;
-        set
-        {
-          if (_isExpanded == value)
-            return;
-          _isExpanded = value;
-          OnPropertyChanged(nameof(IsExpanded));
-        }
-      }
-
-      internal void SetParent(DiffTreeItem parent)
-      {
-        Parent = parent;
-      }
-
-      internal void SetDocument(DiffDocument document)
-      {
-        if (document == null)
-          return;
-        Document = document;
-      }
-
-      internal void SetIsChecked(bool? value, bool updateChildren, bool updateParent)
-      {
-        if (_isUpdating)
-          return;
-
-        if (_isChecked == value)
-        {
-          if (updateChildren && value.HasValue && IsDirectory)
-          {
-            foreach (var child in Children)
-              child.SetIsChecked(value, updateChildren: true, updateParent: false);
-          }
-          return;
-        }
-
-        _isUpdating = true;
-        try
-        {
-          _isChecked = value;
-          OnPropertyChanged(nameof(IsChecked));
-
-          if (updateChildren && value.HasValue && IsDirectory)
-          {
-            foreach (var child in Children)
-              child.SetIsChecked(value, updateChildren: true, updateParent: false);
-          }
-
-          if (updateParent && Parent != null)
-            Parent.SynchronizeCheckStateFromChildren();
-        }
-        finally
-        {
-          _isUpdating = false;
-        }
-
-        _onCheckChanged?.Invoke(this);
-      }
-
-      internal void SynchronizeCheckStateFromChildren()
-      {
-        if (!IsDirectory || Children.Count == 0)
-          return;
-
-        var allChecked = true;
-        var allUnchecked = true;
-
-        foreach (var child in Children)
-        {
-          var state = child.IsChecked;
-          if (state != true)
-            allChecked = false;
-          if (state != false)
-            allUnchecked = false;
-          if (!allChecked && !allUnchecked)
-            break;
-        }
-
-        bool? newValue = allChecked ? true : allUnchecked ? false : (bool?)null;
-        if (_isChecked != newValue)
-        {
-          _isChecked = newValue;
-          OnPropertyChanged(nameof(IsChecked));
-          _onCheckChanged?.Invoke(this);
-        }
-
-        Parent?.SynchronizeCheckStateFromChildren();
-      }
-
-      private void OnPropertyChanged(string propertyName)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-    }
-
-    private static (List<DiffTreeItem> roots, int leafCount) BuildDiffTree(
-      IReadOnlyList<DiffDocument> docs,
-      Action<DiffTreeItem> onCheckChanged)
-    {
-      var roots = new List<DiffTreeItem>();
-      var map = new Dictionary<string, DiffTreeItem>(StringComparer.OrdinalIgnoreCase);
-      var leaves = 0;
-
-      foreach (var doc in docs)
-      {
-        var normalizedPath = NormalizeDiffPath(doc.Path);
-        var segments = SplitDiffPath(normalizedPath);
-        if (segments.Length == 0)
-          segments = new[] { string.IsNullOrEmpty(normalizedPath) ? "codex.diff" : normalizedPath };
-
-        DiffTreeItem parent = null;
-        string key = string.Empty;
-
-        for (var i = 0; i < segments.Length; i++)
-        {
-          var segment = segments[i];
-          var isLast = i == segments.Length - 1;
-          key = string.IsNullOrEmpty(key) ? segment : $"{key}/{segment}";
-
-          if (!map.TryGetValue(key, out var node))
-          {
-            var relativePath = string.IsNullOrEmpty(normalizedPath) ? segment : key;
-            var document = isLast ? doc : null;
-            node = new DiffTreeItem(segment, relativePath, !isLast, document, onCheckChanged);
-            if (parent == null)
-              InsertDiffNodeInOrder(roots, node);
-            else
-              InsertDiffNodeInOrder(parent.Children, node);
-
-            node.SetParent(parent);
-            map[key] = node;
-          }
-          else if (isLast)
-          {
-            node.SetDocument(doc);
-          }
-
-          if (isLast)
-            leaves++;
-
-          parent = node;
-        }
-      }
-
-      return (roots, leaves);
-    }
-
-    private static void InsertDiffNodeInOrder(IList<DiffTreeItem> collection, DiffTreeItem node)
-    {
-      var index = 0;
-      while (index < collection.Count && CompareDiffNodes(collection[index], node) <= 0)
-        index++;
-      collection.Insert(index, node);
-    }
-
-    private static int CompareDiffNodes(DiffTreeItem left, DiffTreeItem right)
-    {
-      if (left == null && right == null)
-        return 0;
-      if (left == null)
-        return 1;
-      if (right == null)
-        return -1;
-      if (left.IsDirectory != right.IsDirectory)
-        return left.IsDirectory ? -1 : 1;
-      return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizeDiffPath(string path)
-    {
-      if (string.IsNullOrWhiteSpace(path))
-        return "codex.diff";
-
-      var normalized = path.Replace('\\', '/').Trim();
-      while (normalized.StartsWith("./", StringComparison.Ordinal))
-        normalized = normalized.Length > 2 ? normalized.Substring(2) : string.Empty;
-      normalized = normalized.Trim('/');
-      if (string.IsNullOrWhiteSpace(normalized))
-        normalized = Path.GetFileName(path) ?? "codex.diff";
-      return normalized;
-    }
-
-    private static string[] SplitDiffPath(string normalizedPath)
-    {
-      if (string.IsNullOrWhiteSpace(normalizedPath))
-        return Array.Empty<string>();
-      return normalizedPath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-    }
-
-    private void HandleDiffSelectionChanged(DiffTreeItem _)
-    {
-      if (_suppressDiffSelectionUpdate)
-        return;
-      UpdateDiffSelectionSummary();
-    }
-
-    private void UpdateDiffSelectionSummary()
-    {
-      if (_suppressDiffSelectionUpdate)
-        return;
-
-      if (this.FindName("DiffSelectionSummary") is not TextBlock summary)
-        return;
-
-      if (_diffTreeRoots == null || _diffTreeRoots.Count == 0)
-      {
-        summary.Text = string.Empty;
-        summary.Visibility = Visibility.Collapsed;
-        return;
-      }
-
-      var (selected, total) = CountSelectedDiffFiles();
-      if (total == 0)
-      {
-        summary.Text = string.Empty;
-        summary.Visibility = Visibility.Collapsed;
-        return;
-      }
-
-      summary.Text = $"Selected {selected} of {total} files.";
-      summary.Visibility = Visibility.Visible;
-    }
-
-    private (int selected, int total) CountSelectedDiffFiles()
-    {
-      var selected = 0;
-      var total = 0;
-
-      foreach (var root in _diffTreeRoots)
-        AccumulateDiffLeafCounts(root, ref selected, ref total);
-
-      return (selected, total);
-    }
-
-    private static void AccumulateDiffLeafCounts(DiffTreeItem item, ref int selected, ref int total)
-    {
-      if (item == null)
-        return;
-
-      if (!item.IsDirectory)
-      {
-        total++;
-        if (item.IsChecked == true)
-          selected++;
-        return;
-      }
-
-      foreach (var child in item.Children)
-        AccumulateDiffLeafCounts(child, ref selected, ref total);
-    }
-
-    private IReadOnlyList<DiffDocument> GetSelectedDiffDocuments()
-    {
-      var results = new List<DiffDocument>();
-      foreach (var root in _diffTreeRoots)
-        CollectSelectedDocuments(root, results);
-
-      if (results.Count == 0 && _diffDocuments.Count > 0)
-        results.AddRange(_diffDocuments.Values);
-
-      return results;
-    }
-
-    private static void CollectSelectedDocuments(DiffTreeItem item, ICollection<DiffDocument> results)
-    {
-      if (item == null)
-        return;
-
-      if (!item.IsDirectory)
-      {
-        if (item.IsChecked == true && item.Document != null)
-          results.Add(item.Document);
-        return;
-      }
-
-      foreach (var child in item.Children)
-        CollectSelectedDocuments(child, results);
-    }
-
-    private async Task<bool> TryDiscardPendingPatchAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (_activeApproval?.Kind == ApprovalKind.Patch)
-      {
-        await ResolveActiveApprovalAsync(false);
-        return true;
-      }
-
-      if (_approvalQueue.Count == 0)
-        return false;
-
-      var handled = false;
-      var pending = new Queue<ApprovalRequest>();
-      var host = _host;
-
-      while (_approvalQueue.Count > 0)
-      {
-        var request = _approvalQueue.Dequeue();
-        if (!handled && request.Kind == ApprovalKind.Patch)
-        {
-          if (host != null)
-            await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, false));
-          await LogManualApprovalAsync("patch", request.Signature, false);
-          handled = true;
-          continue;
-        }
-
-        pending.Enqueue(request);
-      }
-
-      while (pending.Count > 0)
-        _approvalQueue.Enqueue(pending.Dequeue());
-
-      if (handled)
-      {
-        await DisplayNextApprovalAsync();
-        _lastPatchCallId = string.Empty;
-        _lastPatchSignature = string.Empty;
-      }
-
-      return handled;
-    }
-
-    private async Task DiscardPatchAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (_patchApplyInProgress)
-      {
-        await VS.StatusBar.ShowMessageAsync("Codex patch is currently applying. Please wait for completion.");
-        return;
-      }
-
-      var handled = await TryDiscardPendingPatchAsync();
-
-      if (!handled && !string.IsNullOrEmpty(_lastPatchCallId))
-      {
-        var host = _host;
-        if (host != null)
-        {
-          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(_lastPatchCallId, false));
-          await LogManualApprovalAsync("patch", _lastPatchSignature, false);
-        }
-        handled = true;
-      }
-
-      if (!handled && (_diffTreeRoots == null || _diffTreeRoots.Count == 0))
-      {
-        await VS.StatusBar.ShowMessageAsync("No Codex patch to discard.");
-        return;
-      }
-
-      await CompletePatchApplyProgressAsync(false, 0, 0, handled ? "Codex patch discarded." : "Codex patch dismissed.", recordTelemetry: false);
-      await UpdateDiffTreeAsync(Array.Empty<DiffDocument>());
-      _lastPatchCallId = string.Empty;
-      _lastPatchSignature = string.Empty;
-      await VS.StatusBar.ShowMessageAsync("Codex patch discarded.");
-    }
-
-    private async void OnDiscardPatchClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await DiscardPatchAsync();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Discard patch failed: {ex.Message}");
-      }
-    }
-
-    private async Task BeginPatchApplyProgressAsync(string summary, int totalFiles)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      _patchApplyInProgress = true;
-      _patchApplyStartedAt = DateTime.UtcNow;
-      _patchApplyExpectedFiles = Math.Max(totalFiles, 0);
-      _telemetry.BeginPatch();
-
-      if (string.IsNullOrWhiteSpace(summary))
-        summary = _patchApplyExpectedFiles > 0
-          ? $"Applying Codex patch ({_patchApplyExpectedFiles} files)..."
-          : "Applying Codex patch...";
-
-      if (this.FindName("StatusText") is TextBlock status)
-        status.Text = summary;
-
-      if (this.FindName("DiscardPatchButton") is Button discardButton)
-        discardButton.IsEnabled = false;
-
-      await VS.StatusBar.ShowMessageAsync(summary);
-      UpdateTelemetryUi();
-
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[patch] begin: {summary}");
-      }
-      catch
-      {
-        // diagnostics are best effort
-      }
-    }
-
-    private async Task CompletePatchApplyProgressAsync(bool success, int applied, int failed, string messageOverride = null, bool recordTelemetry = true)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var elapsed = _patchApplyStartedAt.HasValue
-        ? (DateTime.UtcNow - _patchApplyStartedAt.Value).TotalSeconds
-        : (double?)null;
-
-      _patchApplyInProgress = false;
-      _patchApplyStartedAt = null;
-      _patchApplyExpectedFiles = 0;
-      _lastPatchCallId = string.Empty;
-      _lastPatchSignature = string.Empty;
-
-      if (applied < 0) applied = 0;
-      if (failed < 0) failed = 0;
-
-      string message = string.IsNullOrWhiteSpace(messageOverride) ? null : messageOverride.Trim();
-      if (string.IsNullOrEmpty(message))
-      {
-        var duration = elapsed.HasValue ? $" in {elapsed.Value:F1}s" : string.Empty;
-        if (success)
-        {
-          var filesPart = applied > 0 ? $"{applied} file{(applied == 1 ? string.Empty : "s")}" : "files";
-          message = $"Codex patch applied ({filesPart}{duration}).";
-        }
-        else
-        {
-          var appliedPart = applied > 0 ? $"{applied} applied" : "0 applied";
-          var failedPart = failed > 0 ? $", {failed} failed" : string.Empty;
-          message = $"Codex patch failed ({appliedPart}{failedPart}{duration}).";
-        }
-      }
-
-      if (this.FindName("StatusText") is TextBlock status)
-        status.Text = message;
-
-      if (this.FindName("DiscardPatchButton") is Button discardButton)
-        discardButton.IsEnabled = true;
-
-      await VS.StatusBar.ShowMessageAsync(message);
-
-      if (recordTelemetry)
-      {
-        var duration = elapsed ?? 0.0;
-        _telemetry.CompletePatch(success, duration);
-      }
-      else
-      {
-        _telemetry.CancelPatch();
-      }
-      UpdateTelemetryUi();
-
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var state = success ? "success" : "failure";
-        await pane.WriteLineAsync($"[patch] {state}: applied={applied}, failed={failed}{(elapsed.HasValue ? $", elapsed={elapsed.Value:F2}s" : string.Empty)}");
-        if (!string.IsNullOrEmpty(messageOverride))
-          await pane.WriteLineAsync($"[patch] detail: {messageOverride}");
-      }
-      catch
-      {
-        // diagnostics best effort
-      }
-    }
-
-    private async Task<bool> ApplySelectedDiffsAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var documents = GetSelectedDiffDocuments();
-      if (documents == null || documents.Count == 0)
-      {
-        await VS.StatusBar.ShowMessageAsync("No files selected for Codex patch.");
-        return false;
-      }
-
-      var applySummary = documents.Count == 1
-        ? $"Applying Codex patch to {documents[0].Path}..."
-        : $"Applying Codex patch ({documents.Count} files)...";
-
-      await BeginPatchApplyProgressAsync(applySummary, documents.Count);
-
-      var applied = 0;
-      var failures = new List<string>();
-      var conflicts = new List<string>();
-      var openDocuments = _options?.AutoOpenPatchedFiles ?? true;
-
-      foreach (var document in documents)
-      {
-        if (document == null || string.IsNullOrEmpty(document.Modified))
-        {
-          failures.Add(document?.Path ?? "(unknown)");
-          continue;
-        }
-
-        var fullPath = ResolveDiffFullPath(document.Path);
-        if (string.IsNullOrEmpty(fullPath))
-        {
-          failures.Add(document.Path);
-          continue;
-        }
-
-        try
-        {
-          var result = await ApplyDocumentTextAsync(fullPath, document, openDocuments);
-          switch (result)
-          {
-            case PatchApplyResult.Applied:
-              applied++;
-              break;
-            case PatchApplyResult.Conflict:
-              conflicts.Add(fullPath);
-              break;
-            default:
-              failures.Add(fullPath);
-              break;
-          }
-        }
-        catch (Exception ex)
-        {
-          failures.Add($"{fullPath}: {ex.Message}");
-        }
-      }
-
-      if (failures.Count > 0 || conflicts.Count > 0)
-      {
-        try
-        {
-          var pane = await DiagnosticsPane.GetAsync();
-          foreach (var failure in failures)
-            await pane.WriteLineAsync($"[error] Failed to apply Codex patch: {failure}");
-          foreach (var conflict in conflicts)
-            await pane.WriteLineAsync($"[warn] Patch conflict for {conflict}; file differs from expected base. Manual merge recommended.");
-        }
-        catch
-        {
-          // diagnostics best effort
-        }
-      }
-
-      var success = failures.Count == 0 && conflicts.Count == 0;
-      string messageOverride = null;
-      if (!success)
-      {
-        if (conflicts.Count > 0 && failures.Count == 0)
-        {
-          messageOverride = conflicts.Count == 1
-            ? "Codex patch encountered a conflict; please merge manually."
-            : $"Codex patch encountered {conflicts.Count} conflicts; please merge manually.";
-        }
-        else if (conflicts.Count > 0)
-        {
-          messageOverride = $"Codex patch completed with {conflicts.Count} conflicts and {failures.Count} errors.";
-        }
-        else if (failures.Count > 0)
-        {
-          messageOverride = failures.Count == 1
-            ? "Codex patch failed for 1 file."
-            : $"Codex patch failed for {failures.Count} files.";
-        }
-      }
-
-      await CompletePatchApplyProgressAsync(success, applied, failures.Count + conflicts.Count, messageOverride);
-
-      return success;
-    }
-
-    private async Task<PatchApplyResult> ApplyDocumentTextAsync(string fullPath, DiffDocument document, bool openDocument)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (string.IsNullOrWhiteSpace(fullPath))
-        return PatchApplyResult.Failed;
-
-      var normalizedPath = NormalizeDirectory(fullPath);
-      var directory = Path.GetDirectoryName(normalizedPath);
-      if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-        Directory.CreateDirectory(directory);
-
-      if (!File.Exists(normalizedPath))
-        File.WriteAllText(normalizedPath, string.Empty, Encoding.UTF8);
-
-      if (IsFileReadOnly(normalizedPath))
-      {
-        await LogPatchReadOnlyAsync(normalizedPath);
-        return PatchApplyResult.Failed;
-      }
-
-      DocumentView documentView = null;
-      if (openDocument)
-      {
-        try
-        {
-          documentView = await VS.Documents.OpenAsync(normalizedPath);
-        }
-        catch
-        {
-          documentView = null;
-        }
-      }
-      else
-      {
-        try
-        {
-          documentView = await VS.Documents.GetDocumentViewAsync(normalizedPath);
-        }
-        catch
-        {
-          documentView = null;
-        }
-      }
-
-      var buffer = documentView?.TextBuffer;
-      var newText = NormalizeFileContent(document?.Modified ?? string.Empty);
-
-      var currentText = buffer != null
-        ? buffer.CurrentSnapshot.GetText()
-        : File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
-
-      if (!string.IsNullOrEmpty(document?.Original))
-      {
-        var normalizedCurrent = NormalizeForComparison(currentText);
-        var normalizedOriginal = NormalizeForComparison(document.Original);
-        if (!string.Equals(normalizedCurrent, normalizedOriginal, StringComparison.Ordinal))
-        {
-          return PatchApplyResult.Conflict;
-        }
-      }
-
-      if (documentView?.Document?.IsReadOnly == true)
-      {
-        await LogPatchReadOnlyAsync(normalizedPath);
-        return PatchApplyResult.Failed;
-      }
-
-      if (buffer != null)
-      {
-        using var edit = buffer.CreateEdit();
-        edit.Replace(0, buffer.CurrentSnapshot.Length, newText);
-        if (!edit.Apply())
-          return PatchApplyResult.Failed;
-
-        if (buffer.Properties.TryGetProperty(typeof(ITextDocument), out ITextDocument textDocument))
-          textDocument?.MarkDirty();
-        if (!openDocument && documentView?.WindowFrame == null)
-        {
-          try
-          {
-            File.WriteAllText(normalizedPath, buffer.CurrentSnapshot.GetText(), Encoding.UTF8);
-          }
-          catch
-          {
-            // if writing fails, keep buffer dirty and continue
-          }
-        }
-        return PatchApplyResult.Applied;
-      }
-
-      File.WriteAllText(normalizedPath, newText, Encoding.UTF8);
-
-      if (openDocument)
-      {
-        try
-        {
-          await VS.Documents.OpenAsync(normalizedPath);
-        }
-        catch
-        {
-          // best effort
-        }
-      }
-
-      return PatchApplyResult.Applied;
-    }
-
-    private string ResolveDiffFullPath(string path)
-    {
-      if (string.IsNullOrWhiteSpace(path))
-        return string.Empty;
-
-      if (Path.IsPathRooted(path))
-        return NormalizeDirectory(path);
-
-      var relative = ConvertDiffPathToPlatform(path);
-
-      foreach (var baseDir in new[] { _workingDir, _lastKnownWorkspaceRoot, _lastKnownSolutionRoot })
-      {
-        var candidate = CombineWithBaseDirectory(baseDir, relative);
-        if (!string.IsNullOrEmpty(candidate) && (File.Exists(candidate) || Directory.Exists(Path.GetDirectoryName(candidate) ?? string.Empty)))
-          return candidate;
-      }
-
-      var fallback = CombineWithBaseDirectory(_workingDir, relative);
-      return string.IsNullOrEmpty(fallback) ? NormalizeDirectory(relative) : fallback;
-    }
-
-    private static string CombineWithBaseDirectory(string baseDir, string relativePath)
-    {
-      if (string.IsNullOrWhiteSpace(relativePath))
-        return string.Empty;
-      if (string.IsNullOrWhiteSpace(baseDir))
-        return NormalizeDirectory(relativePath);
-
-      try
-      {
-        return NormalizeDirectory(Path.Combine(baseDir, relativePath));
-      }
-      catch
-      {
-        return NormalizeDirectory(relativePath);
-      }
-    }
-
-    private static string ConvertDiffPathToPlatform(string path)
-    {
-      if (string.IsNullOrWhiteSpace(path))
-        return string.Empty;
-      var normalized = NormalizeDiffPath(path);
-      return normalized.Replace('/', Path.DirectorySeparatorChar);
-    }
-
-    private static bool IsFileReadOnly(string path)
-    {
-      try
-      {
-        var info = new FileInfo(path);
-        return info.Exists && info.IsReadOnly;
-      }
-      catch
-      {
-        return false;
-      }
-    }
-
-    private static async Task LogPatchReadOnlyAsync(string path)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[warn] Skipping patch for {path}: file is read-only or locked.");
-      }
-      catch
-      {
-        // diagnostics best effort
-      }
-    }
-
-    private async void OnExecCancelClick(object sender, RoutedEventArgs e)
-    {
-      if (sender is not Button button)
-        return;
-
-      var execId = button.Tag as string;
-      if (string.IsNullOrEmpty(execId))
-        return;
-
-      button.IsEnabled = false;
-      if (_execTurns.TryGetValue(execId, out var turn))
-        turn.CancelRequested = true;
-
-      if (this.FindName("StatusText") is TextBlock status)
-        status.Text = "Cancelling exec...";
-
-      var ok = await SendExecCancelAsync(execId);
-      if (!ok)
-      {
-        if (_execTurns.TryGetValue(execId, out var retryTurn))
-          retryTurn.CancelRequested = false;
-        button.IsEnabled = true;
-        if (this.FindName("StatusText") is TextBlock statusRetry)
-          statusRetry.Text = "Exec cancel failed";
-      }
-      else
-      {
-        _telemetry.CancelExec(execId);
-        UpdateTelemetryUi();
-      }
-    }
-
-    private async void OnExecCopyAllClick(object sender, RoutedEventArgs e)
-    {
-      if (sender is not Button button || button.Tag is not ExecTurn turn)
-        return;
-
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        var text = ChatTextUtilities.StripAnsi(turn.Buffer.ToString()).TrimEnd('\n');
-        if (string.IsNullOrWhiteSpace(text))
-        {
-          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
-          return;
-        }
-
-        Clipboard.SetText(text);
-        await VS.StatusBar.ShowMessageAsync("Exec output copied to clipboard.");
-      }
-      catch (Exception ex)
-      {
-        try
-        {
-          var pane = await DiagnosticsPane.GetAsync();
-          await pane.WriteLineAsync($"[error] Exec copy failed: {ex.Message}");
-        }
-        catch
-        {
-          // diagnostics best effort
-        }
-      }
-    }
-
-    private async void OnExecClearClick(object sender, RoutedEventArgs e)
-    {
-      if (sender is not Button button || button.Tag is not ExecTurn turn)
-        return;
-
-      turn.Buffer.Clear();
-      RenderAnsiText(turn.Body, string.Empty, turn.DefaultForeground ?? turn.Body.Foreground);
-
-      if (this.FindName("StatusText") is TextBlock status)
-        status.Text = "Exec output cleared.";
-
-      try
-      {
-        await VS.StatusBar.ShowMessageAsync("Exec output cleared.");
-      }
-      catch
-      {
-        // status bar optional
-      }
-    }
-
-    private void OnExecConsoleToggleChanged(object sender, RoutedEventArgs e)
-    {
-      if (_suppressExecToggleEvent)
-        return;
-
-      if (FindName("ExecConsoleToggle") is not ToggleButton toggle)
-        return;
-
-      var visible = toggle.IsChecked == true;
-      if (_options != null)
-        _options.ExecConsoleVisible = visible;
-
-      foreach (var turn in _execConsoleTurns)
-        ApplyExecConsoleVisibility(turn);
-      UpdateMcpToolsUi();
-    }
-
-    private void OnRefreshMcpToolsClick(object sender, RoutedEventArgs e)
-    {
-      var now = DateTime.UtcNow;
-      var timeSinceLastRefresh = now - _lastMcpToolsRefresh;
-      
-      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
-      {
-        // Show debounce message
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
-        });
-        return;
-      }
-      
-      _lastMcpToolsRefresh = now;
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("user-refresh"));
-    }
-
-    private void OnMcpHelpClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        // Open MCP documentation in browser
-        var url = "https://codex.anthropic.com/docs/mcp";
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-        {
-          FileName = url,
-          UseShellExecute = true
-        });
-        
-        // Log telemetry for help link click
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await LogTelemetryAsync("mcp_help_clicked", new Dictionary<string, object>
-          {
-            ["url"] = url
-          });
-        });
-      }
-      catch (Exception ex)
-      {
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Failed to open MCP documentation: {ex.Message}");
-        });
-      }
-    }
-
-    private void OnRefreshPromptsClick(object sender, RoutedEventArgs e)
-    {
-      var now = DateTime.UtcNow;
-      var timeSinceLastRefresh = now - _lastPromptsRefresh;
-      
-      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
-      {
-        // Show debounce message
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
-        });
-        return;
-      }
-      
-      _lastPromptsRefresh = now;
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("user-refresh"));
-    }
-
-    private void OnCustomPromptClick(object sender, MouseButtonEventArgs e)
-    {
-      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
-        return;
-
-      try
-      {
-        // Insert the prompt body into the input box
-        if (FindName("InputBox") is TextBox inputBox)
-        {
-          var currentText = inputBox.Text ?? string.Empty;
-          var promptText = prompt.Body ?? string.Empty;
-          
-          if (string.IsNullOrWhiteSpace(currentText))
-          {
-            inputBox.Text = promptText;
-          }
-          else
-          {
-            // Insert at cursor position or append
-            var cursorPosition = inputBox.CaretIndex;
-            inputBox.Text = currentText.Insert(cursorPosition, promptText);
-            inputBox.CaretIndex = cursorPosition + promptText.Length;
-          }
-          
-          inputBox.Focus();
-          
-              // Track last used prompt
-              _options.LastUsedPrompt = prompt.Id;
-              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-              {
-                await VS.Settings.SaveAsync();
-              });
-
-              // Record telemetry for prompt insertion
-              _telemetryTracker.RecordPromptInsert();
-
-              // Log telemetry for prompt insertion
-              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-              {
-                await LogTelemetryAsync("prompt_inserted", new Dictionary<string, object>
-                {
-                  ["prompt_id"] = prompt.Id,
-                  ["prompt_name"] = prompt.Name,
-                  ["prompt_source"] = prompt.Source
-                });
-              });
-        }
-      }
-      catch (Exception ex)
-      {
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Failed to insert prompt: {ex.Message}");
-        });
-      }
-    }
-
-    private void OnMcpToolClick(object sender, MouseButtonEventArgs e)
-    {
-      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
-        return;
-
-      try
-      {
-        // Track last used tool
-        _options.LastUsedTool = tool.Name;
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-        {
-          await VS.Settings.SaveAsync();
-        });
-
-        // Record telemetry for tool invocation
-        _telemetryTracker.RecordToolInvocation();
-
-        // Log telemetry for tool selection
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-        {
-          await LogTelemetryAsync("tool_selected", new Dictionary<string, object>
-          {
-            ["tool_name"] = tool.Name,
-            ["tool_server"] = tool.Server
-          });
-        });
-        
-        // Show a message about the tool
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Selected tool: {tool.Name}");
-        });
-      }
-      catch (Exception ex)
-      {
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Failed to select tool: {ex.Message}");
-        });
-      }
-    }
-
-    private void OnMcpToolMouseEnter(object sender, MouseEventArgs e)
-    {
-      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
-        return;
-
-      try
-      {
-        // Show tool details on hover
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync($"Tool: {tool.Name} - {tool.Description}");
-        });
-      }
-      catch
-      {
-        // Ignore errors in hover
-      }
-    }
-
-    private void OnMcpToolMouseLeave(object sender, MouseEventArgs e)
-    {
-      if (sender is not Border border)
-        return;
-
-      try
-      {
-        // Clear status bar message
-        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
-        {
-          await VS.StatusBar.ShowMessageAsync("");
-        });
-      }
-      catch
-      {
-        // Ignore errors in hover
-      }
-    }
-
-    private void OnCustomPromptMouseEnter(object sender, MouseEventArgs e)
-    {
-      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
-        return;
-
-      try
-      {
-        // Show preview of the prompt body
-        if (border.FindName("PromptPreview") is TextBlock preview)
-        {
-          preview.Visibility = Visibility.Visible;
-        }
-      }
-      catch
-      {
-        // Ignore errors in hover preview
-      }
-    }
-
-    private void OnCustomPromptMouseLeave(object sender, MouseEventArgs e)
-    {
-      if (sender is not Border border)
-        return;
-
-      try
-      {
-        // Hide preview of the prompt body
-        if (border.FindName("PromptPreview") is TextBlock preview)
-        {
-          preview.Visibility = Visibility.Collapsed;
-        }
-      }
-      catch
-      {
-        // Ignore errors in hover preview
-      }
-    }
-
-    private async void OnExecExportClick(object sender, RoutedEventArgs e)
-    {
-      if (sender is not Button button || button.Tag is not ExecTurn turn)
-        return;
-
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        var buffer = ChatTextUtilities.StripAnsi(turn.Buffer.ToString());
-        if (string.IsNullOrWhiteSpace(buffer))
-        {
-          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
-          return;
-        }
-
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-          Title = "Export Exec Output",
-          Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
-          FileName = BuildExecExportFileName(turn)
-        };
-
-        var result = dialog.ShowDialog();
-        if (result != true || string.IsNullOrWhiteSpace(dialog.FileName))
-          return;
-
-        File.WriteAllText(dialog.FileName, buffer);
-        await VS.StatusBar.ShowMessageAsync($"Exec output saved to {Path.GetFileName(dialog.FileName)}.");
-      }
-      catch (Exception ex)
-      {
-        try
-        {
-          var pane = await DiagnosticsPane.GetAsync();
-          await pane.WriteLineAsync($"[error] Exec export failed: {ex.Message}");
-        }
-        catch
-        {
-          // diagnostics best effort
-        }
-      }
-    }
-
-    private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)
-    {
-      if (sender is not CheckBox checkBox || checkBox.DataContext is not DiffTreeItem item)
-        return;
-
-      var next = item.IsChecked != true;
-      _suppressDiffSelectionUpdate = true;
-      try
-      {
-        item.SetIsChecked(next, updateChildren: true, updateParent: true);
-      }
-      finally
-      {
-        _suppressDiffSelectionUpdate = false;
-      }
-
-      HandleDiffSelectionChanged(item);
-      e.Handled = true;
-    }
-
-    private static string ExtractDocumentText(JObject container, string[] keys)
-    {
-      if (container == null)
-        return string.Empty;
-
-      foreach (var key in keys)
-      {
-        if (container.TryGetValue(key, out var token))
-        {
-          var text = CollectTokenText(token);
-          if (!string.IsNullOrEmpty(text))
-            return text;
-        }
-
-        if (container[key] is JObject nested)
-        {
-          var text = TryGetString(nested, "text") ?? TryGetString(nested, "value");
-          if (!string.IsNullOrEmpty(text))
-            return text;
-        }
-      }
-
-      return string.Empty;
-    }
-
-    private static string ExtractNestedText(JObject parent, params string[] keys)
-    {
-      if (parent == null || keys == null || keys.Length == 0)
-        return string.Empty;
-
-      JToken current = parent;
-      foreach (var key in keys)
-      {
-        if (current is not JObject obj || !obj.TryGetValue(key, out current))
-          return string.Empty;
-      }
-
-      return CollectTokenText(current);
-    }
-
-    private static string CollectTokenText(JToken token)
-    {
-      if (token == null)
-        return string.Empty;
-
-      return token.Type switch
-      {
-        JTokenType.String => token.ToString(),
-        JTokenType.Object => TryGetString((JObject)token, "text") ?? TryGetString((JObject)token, "value") ?? string.Empty,
-        JTokenType.Array => string.Concat(token.Children().Select(CollectTokenText)),
-        _ => token.ToString()
-      };
-    }
-
-    private async Task ShowDiffAsync(DiffDocument doc)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      IVsDifferenceService diffService;
-      try
-      {
-        diffService = await VS.GetRequiredServiceAsync<SVsDifferenceService, IVsDifferenceService>();
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Unable to acquire diff service: {ex.Message}");
-        return;
-      }
-
-      var originalFile = CreateTempDiffFile(doc.Path, doc.Original, "original");
-      var modifiedFile = CreateTempDiffFile(doc.Path, doc.Modified, "modified");
-
-      var caption = $"Codex Diff - {doc.Path}";
-      var tooltip = caption;
-      var originalLabel = $"{doc.Path} (current)";
-      var modifiedLabel = $"{doc.Path} (Codex)";
-
-      const __VSDIFFSERVICEOPTIONS options =
-        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary |
-        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_RightFileIsTemporary |
-        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_ForceNewWindow |
-        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_SuppressDiffNavigate;
-
-      try
-      {
-        diffService.OpenComparisonWindow2(
-          originalFile,
-          modifiedFile,
-          caption,
-          tooltip,
-          originalLabel,
-          modifiedLabel,
-          string.Empty,
-          string.Empty,
-          (uint)options);
-
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[diff] Opened diff for {doc.Path}");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Failed to open diff viewer for {doc.Path}: {ex.Message}");
-      }
-    }
-
-    private static string CreateTempDiffFile(string displayPath, string contents, string suffix)
-    {
-      var safeName = Path.GetFileName(displayPath);
-      if (string.IsNullOrEmpty(safeName))
-        safeName = "codex";
-
-      foreach (var invalid in Path.GetInvalidFileNameChars())
-        safeName = safeName.Replace(invalid, '_');
-
-      var dir = Path.Combine(Path.GetTempPath(), "CodexVS22", "Diffs");
-      Directory.CreateDirectory(dir);
-
-      var filePath = Path.Combine(dir, $"{safeName}.{suffix}.{Guid.NewGuid():N}.tmp");
-      File.WriteAllText(filePath, contents ?? string.Empty, Encoding.UTF8);
-      return filePath;
-    }
-
-    private async Task UpdateFullAccessBannerAsync()
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      var banner = this.FindName("FullAccessBanner") as Border;
-      var text = this.FindName("FullAccessText") as TextBlock;
-      if (banner == null || text == null)
-        return;
-
-      var mode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
-      var show = mode == CodexOptions.ApprovalMode.AgentFullAccess;
-      banner.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-      if (show)
-      {
-        text.Text = "Full Access mode is enabled. Codex may auto-approve exec commands and patches.";
-      }
-    }
-
-    private void EnqueueFullAccessBannerRefresh()
-    {
-      ThreadHelper.JoinableTaskFactory.RunAsync(UpdateFullAccessBannerAsync);
-    }
-
-    private static string NormalizeCwd(string cwd)
-    {
-      if (string.IsNullOrWhiteSpace(cwd))
-        return string.Empty;
-
-      var normalized = cwd.Trim();
-      if (normalized.EndsWith("/.", StringComparison.Ordinal) || normalized.EndsWith("\\.", StringComparison.Ordinal))
-      {
-        normalized = normalized.Length > 2
-          ? normalized.Substring(0, normalized.Length - 2)
-          : normalized.Substring(0, normalized.Length - 1);
-      }
-
-      return normalized;
-    }
-
-    internal readonly struct EnvironmentSnapshot
-    {
-      public static readonly EnvironmentSnapshot Empty = new(string.Empty, string.Empty);
-
-      public EnvironmentSnapshot(string solutionRoot, string workspaceRoot)
-      {
-        SolutionRoot = string.IsNullOrWhiteSpace(solutionRoot) ? string.Empty : solutionRoot;
-        WorkspaceRoot = string.IsNullOrWhiteSpace(workspaceRoot) ? string.Empty : workspaceRoot;
-      }
-
-      public string SolutionRoot { get; }
-      public string WorkspaceRoot { get; }
-    }
-
-    private void RemoveExecIdMappings(string canonicalId)
-    {
-      if (string.IsNullOrEmpty(canonicalId))
-        return;
-
-      var keysToRemove = _execIdRemap
-        .Where(kvp => string.Equals(kvp.Value, canonicalId, StringComparison.Ordinal))
-        .Select(kvp => kvp.Key)
-        .ToList();
-
-      foreach (var key in keysToRemove)
-        _execIdRemap.Remove(key);
-    }
-
-    private static readonly Regex AnsiCodeRegex = new("\x1B\\[(?<code>[0-9;]*)m", RegexOptions.Compiled);
-
-    private static readonly Brush[] AnsiBrushes =
-    {
-      Brushes.DimGray,      // black
-      Brushes.IndianRed,    // red
-      Brushes.SeaGreen,     // green
-      Brushes.Goldenrod,    // yellow
-      Brushes.SteelBlue,    // blue
-      Brushes.Orchid,       // magenta
-      Brushes.Teal,         // cyan
-      Brushes.Gainsboro     // white
-    };
-
-    private static readonly Brush[] AnsiBrightBrushes =
-    {
-      Brushes.LightGray,
-      Brushes.Red,
-      Brushes.LimeGreen,
-      Brushes.Yellow,
-      Brushes.DeepSkyBlue,
-      Brushes.MediumOrchid,
-      Brushes.Aqua,
-      Brushes.White
-    };
-
-    private void OnExecContainerPreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-      if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
-        return;
-
-      if (sender is not Border border || border.Tag is not ExecTurn turn)
-        return;
-
-      e.Handled = true;
-
-      var delta = e.Delta > 0 ? 20 : -20;
-      var newHeight = Math.Max(80, Math.Min(600, border.MaxHeight + delta));
-      border.MaxHeight = newHeight;
-      _execConsolePreferredHeight = newHeight;
-
-      if (_options != null)
-        _options.ExecConsoleHeight = newHeight;
-
-      ApplyExecConsoleVisibility(turn);
-    }
-
-    private void ApplyExecConsoleVisibility(ExecTurn turn)
-    {
-      if (turn?.Container == null)
-        return;
-
-      var show = ShouldShowExecTurn(turn?.IsRunning ?? false);
-      turn.Container.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-
-      if (show)
-        turn.Container.MaxHeight = _execConsolePreferredHeight;
-    }
-
-    private bool ShouldShowExecTurn(bool running)
-    {
-      if (running)
-        return true;
-
-      if (_options?.AutoHideExecConsole ?? false)
-        return false;
-
-      return _options?.ExecConsoleVisible ?? true;
-    }
-
-    private async Task RequestMcpToolsAsync(string reason)
-    {
-      var host = _host;
-      if (host == null)
-        return;
-
-      try
-      {
-        var submission = new JObject
-        {
-          ["id"] = Guid.NewGuid().ToString(),
-          ["op"] = new JObject
-          {
-            ["type"] = "list_mcp_tools"
-          }
-        };
-
-        var json = submission.ToString(Formatting.None);
-        var ok = await host.SendAsync(json);
-        var pane = await DiagnosticsPane.GetAsync();
-        if (ok)
-          await pane.WriteLineAsync($"[info] Requested MCP tools ({reason}).");
-        else
-          await pane.WriteLineAsync($"[warn] Failed to request MCP tools ({reason}).");
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] RequestMcpToolsAsync failed: {ex.Message}");
-      }
-    }
-
-    private async Task RequestCustomPromptsAsync(string reason)
-    {
-      var host = _host;
-      if (host == null)
-        return;
-
-      try
-      {
-        var submission = new JObject
-        {
-          ["id"] = Guid.NewGuid().ToString(),
-          ["op"] = new JObject
-          {
-            ["type"] = "list_custom_prompts"
-          }
-        };
-
-        var json = submission.ToString(Formatting.None);
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[info] Requesting custom prompts ({reason}).");
-        await host.SendAsync(json);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] RequestCustomPromptsAsync failed: {ex.Message}");
-      }
-    }
-
-    private void ApplyExecBufferLimit(ExecTurn turn)
-    {
-      if (turn?.Buffer == null)
-        return;
-
-      var limit = _options?.ExecOutputBufferLimit ?? 0;
-      if (limit <= 0)
-        return;
-
-      if (turn.Buffer.Length <= limit)
-        return;
-
-      var excess = turn.Buffer.Length - limit;
-      if (excess < limit / 5)
-        excess = limit / 5;
-
-      turn.Buffer.Remove(0, excess);
-    }
-
-    private static string BuildExecExportFileName(ExecTurn turn)
-    {
-      var source = !string.IsNullOrWhiteSpace(turn?.NormalizedCommand)
-        ? turn.NormalizedCommand
-        : turn?.ExecId;
-
-      var safe = SanitizeFileName(source);
-      if (string.IsNullOrEmpty(safe))
-        safe = "codex-exec";
-
-      var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
-      return $"{safe}-{timestamp}.txt";
-    }
-
-    private static string SanitizeFileName(string name)
-    {
-      if (string.IsNullOrWhiteSpace(name))
-        return string.Empty;
-
-      var invalid = Path.GetInvalidFileNameChars();
-      var builder = new StringBuilder(name.Length);
-      foreach (var ch in name)
-      {
-        if (invalid.Contains(ch) || char.IsControl(ch))
-        {
-          builder.Append('-');
-          continue;
-        }
-
-        builder.Append(ch);
-      }
-
-      var sanitized = builder.ToString().Trim('-');
-      if (sanitized.Length > 80)
-        sanitized = sanitized.Substring(0, 80);
-
-      return sanitized;
-    }
-
-    private void UpdateMcpToolsUi()
-    {
-      if (FindName("McpToolsContainer") is not Border container ||
-          FindName("McpToolsEmptyText") is not StackPanel emptyPanel ||
-          FindName("McpToolsList") is not ItemsControl list)
-        return;
-
-      if (list.ItemsSource != _mcpTools)
-        list.ItemsSource = _mcpTools;
-
-      if (_mcpTools.Count == 0)
-      {
-        emptyPanel.Visibility = Visibility.Visible;
-        container.Visibility = Visibility.Visible;
-      }
-      else
-      {
-        emptyPanel.Visibility = Visibility.Collapsed;
-        container.Visibility = Visibility.Visible;
-      }
-
-      UpdateMcpToolRunsUi();
-    }
-
-    private void UpdateMcpToolRunsUi()
-    {
-      if (FindName("McpToolRunsContainer") is not Border container ||
-          FindName("McpToolRunsList") is not ItemsControl list)
-        return;
-
-      if (list.ItemsSource != _mcpToolRuns)
-        list.ItemsSource = _mcpToolRuns;
-
-      container.Visibility = _mcpToolRuns.Count > 0
-        ? Visibility.Visible
-        : Visibility.Collapsed;
-    }
-
-    private void UpdateCustomPromptsUi()
-    {
-      if (FindName("CustomPromptsContainer") is not Border container ||
-          FindName("CustomPromptsList") is not ItemsControl list ||
-          FindName("CustomPromptsEmptyText") is not TextBlock empty)
-        return;
-
-      if (list.ItemsSource != _customPrompts)
-        list.ItemsSource = _customPrompts;
-
-      if (_customPrompts.Count == 0)
-      {
-        empty.Visibility = Visibility.Visible;
-        container.Visibility = Visibility.Visible;
-      }
-      else
-      {
-        empty.Visibility = Visibility.Collapsed;
-        container.Visibility = Visibility.Visible;
-      }
-    }
-
-    private static void AppendExecText(ExecTurn turn, string text)
-    {
-      if (turn == null || string.IsNullOrEmpty(text))
-        return;
-
-      turn.Buffer.Append(text);
-      if (!text.EndsWith("\n", StringComparison.Ordinal))
-        turn.Buffer.Append('\n');
-
-      ApplyExecBufferLimit(turn);
-
-      var bufferText = turn.Buffer.ToString();
-      RenderAnsiText(turn.Body, bufferText, turn.DefaultForeground ?? turn.Body.Foreground);
-    }
-
-    private static void RenderAnsiText(TextBlock block, string text, Brush defaultBrush)
-    {
-      if (block == null)
-        return;
-
-      block.Inlines.Clear();
-
-      if (string.IsNullOrEmpty(text))
-        return;
-
-      var currentBrush = defaultBrush;
-      var isBold = false;
-      var lastIndex = 0;
-
-      foreach (Match match in AnsiCodeRegex.Matches(text))
-      {
-        if (match.Index > lastIndex)
-        {
-          var segment = text.Substring(lastIndex, match.Index - lastIndex);
-          AppendAnsiSegment(block, segment, currentBrush, isBold);
-        }
-
-        var codes = match.Groups["code"].Value;
-        UpdateAnsiState(codes, defaultBrush, ref currentBrush, ref isBold);
-        lastIndex = match.Index + match.Length;
-      }
-
-      if (lastIndex < text.Length)
-      {
-        var tail = text.Substring(lastIndex);
-        AppendAnsiSegment(block, tail, currentBrush, isBold);
-      }
-    }
-
-    private static void AppendAnsiSegment(TextBlock block, string segment, Brush brush, bool bold)
-    {
-      if (block == null || string.IsNullOrEmpty(segment))
-        return;
-
-      var sanitized = segment.Replace("\r", string.Empty);
-      if (sanitized.Length == 0)
-        return;
-
-      var run = new Run(sanitized)
-      {
-        Foreground = brush,
-        FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal
-      };
-      block.Inlines.Add(run);
-    }
-
-    private static void UpdateAnsiState(string codes, Brush defaultBrush, ref Brush brush, ref bool bold)
-    {
-      if (defaultBrush == null)
-        defaultBrush = Brushes.Gainsboro;
-
-      if (string.IsNullOrEmpty(codes))
-      {
-        brush = defaultBrush;
-        bold = false;
-        return;
-      }
-
-      var parts = codes.Split(';');
-      foreach (var part in parts)
-      {
-        if (string.IsNullOrWhiteSpace(part))
-        {
-          brush = defaultBrush;
-          bold = false;
-          continue;
-        }
-
-        if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
-          continue;
-
-        switch (code)
-        {
-          case 0:
-            brush = defaultBrush;
-            bold = false;
-            break;
-          case 1:
-            bold = true;
-            break;
-          case 22:
-            bold = false;
-            break;
-          case 39:
-            brush = defaultBrush;
-            break;
-          default:
-            if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
-            {
-              var resolved = ResolveAnsiBrush(code);
-              if (resolved != null)
-                brush = resolved;
-            }
-            break;
-        }
-      }
-    }
-
-    private static Brush ResolveAnsiBrush(int code)
-    {
-      var bright = false;
-      if (code >= 90 && code <= 97)
-      {
-        bright = true;
-        code -= 60;
-      }
-
-      var index = code - 30;
-      if (index < 0 || index >= AnsiBrushes.Length)
-        return null;
-
-      return bright ? AnsiBrightBrushes[index] : AnsiBrushes[index];
-    }
-
-    private void UpdateExecCancelState(ExecTurn turn, bool running)
-    {
-      if (turn == null)
-        return;
-
-      turn.IsRunning = running;
-      turn.CancelRequested = false;
-
-      if (turn.CancelButton != null)
-      {
-        turn.CancelButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        turn.CancelButton.IsEnabled = true;
-      }
-
-      ApplyExecConsoleVisibility(turn);
-
-      if (running)
-        ScrollTranscriptToEnd();
-    }
-
-    private AssistantTurn GetOrCreateAssistantTurn(string id)
-    {
-      if (_assistantTurns.TryGetValue(id, out var turn))
-        return turn;
-
-      var elements = CreateAssistantBubble();
-      turn = new AssistantTurn(elements);
-      _assistantTurns[id] = turn;
-      return turn;
-    }
-
-    private ChatBubbleElements CreateAssistantBubble()
-      => CreateChatBubble("assistant", string.Empty, DateTime.UtcNow);
-
-    private void AppendAssistantText(AssistantTurn turn, string delta, bool isFinal = false, bool decorate = true)
-    {
-      if (turn == null || string.IsNullOrEmpty(delta))
-        return;
-
-      if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
-        turn.Buffer.AppendLine();
-
-      turn.Buffer.Append(delta);
-      var cleaned = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
-      turn.Bubble.Text = cleaned;
-      UpdateBubbleAutomation(turn.Header, turn.Bubble, cleaned);
-      ScrollTranscriptToEnd();
-
-      if (!decorate)
-        return;
-
-      _assistantChunkCounter++;
-      if (!isFinal && _assistantChunkCounter % 5 == 0)
-      {
-        turn.Bubble.Text += "\n";
-      }
-    }
-
-    private void AttachCopyContextMenu(TextBlock bubble)
-    {
-      if (bubble == null)
-        return;
-
-      var menu = new ContextMenu();
-      var item = new MenuItem
-      {
-        Header = "Copy Message",
-        Tag = bubble
-      };
-      item.Click += OnCopyMessageMenuItemClick;
-      menu.Items.Add(item);
-      bubble.ContextMenu = menu;
-    }
-
-    private void UpdateStreamingIndicator(bool streaming)
-    {
-      if (this.FindName("StreamingIndicator") is not ProgressBar indicator)
-        return;
-      indicator.Visibility = streaming ? Visibility.Visible : Visibility.Collapsed;
-      if (!streaming)
-        indicator.BeginAnimation(ProgressBar.OpacityProperty, null);
-    }
-
-    private void FocusInputBox()
-    {
-      Dispatcher.BeginInvoke(new Action(() =>
-      {
-        if (this.FindName("InputBox") is TextBox input)
-        {
-          if (!input.IsKeyboardFocusWithin)
-            input.Focus();
-        }
-      }), DispatcherPriority.Input);
-    }
-
-    private async void OnCopyMessageMenuItemClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        if (sender is MenuItem item && item.Tag is TextBlock bubble)
-        {
-          var text = bubble.Text ?? string.Empty;
-          if (bubble.Tag is ExecTurn execTurn)
-          {
-            var buffer = execTurn.Buffer.ToString();
-            text = ChatTextUtilities.StripAnsi(buffer).TrimEnd('\n');
-          }
-          if (string.IsNullOrWhiteSpace(text))
-            return;
-          Clipboard.SetText(text);
-          await VS.StatusBar.ShowMessageAsync("Message copied to clipboard.");
-          AnimateBubbleFeedback(bubble);
-        }
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] Copy message failed: {ex.Message}");
-      }
-    }
-
-    private ChatBubbleElements CreateChatBubble(string role, string initialText = "", DateTime? timestamp = null)
-    {
-      if (this.FindName("Transcript") is not StackPanel transcript)
-        throw new InvalidOperationException("Transcript panel missing");
-
-      var margin = role switch
-      {
-        "assistant" => new Thickness(60, 4, 0, 4),
-        _ => new Thickness(0, 4, 60, 4)
-      };
-      var alignment = role switch
-      {
-        "assistant" => HorizontalAlignment.Right,
-        _ => HorizontalAlignment.Left
-      };
-
-      var when = (timestamp ?? DateTime.UtcNow).ToLocalTime();
-      var headerText = $"{GetRoleDisplayName(role)} — {when.ToString("t", CultureInfo.CurrentCulture)}";
-
-      var container = new Border
-      {
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(10),
-        Margin = margin,
-        BorderThickness = new Thickness(1),
-        MaxWidth = 520,
-        HorizontalAlignment = alignment
-      };
-      container.SetResourceReference(Border.BorderBrushProperty, VsBrushes.ToolWindowBorderKey);
-      ApplyChatBubbleBrush(container, role);
-
-      var header = new TextBlock
-      {
-        Text = headerText,
-        FontWeight = FontWeights.SemiBold,
-        Margin = new Thickness(0, 0, 0, 4)
-      };
-      header.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-
-      var bubble = new TextBlock
-      {
-        Text = initialText,
-        Tag = role,
-        TextWrapping = TextWrapping.Wrap,
-        TextAlignment = TextAlignment.Left,
-        Visibility = Visibility.Visible
-      };
-      bubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-      AttachCopyContextMenu(bubble);
-
-      var layout = new StackPanel
-      {
-        Orientation = Orientation.Vertical
-      };
-      layout.Children.Add(header);
-      layout.Children.Add(bubble);
-
-      container.Child = layout;
-      transcript.Children.Add(container);
-      UpdateBubbleAutomation(header, bubble, initialText);
-      ScrollTranscriptToEnd();
-
-      return new ChatBubbleElements(container, header, bubble);
-    }
-
-    private static string GetRoleDisplayName(string role)
-      => string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase) ? "Codex" : "You";
-
-    private void UpdateBubbleAutomation(TextBlock header, TextBlock bubble, string bodyText)
-    {
-      if (header == null || bubble == null)
-        return;
-
-      var sanitized = string.IsNullOrWhiteSpace(bodyText)
-        ? string.Empty
-        : bodyText.Replace('\r', ' ').Replace('\n', ' ').Trim();
-
-      var name = string.IsNullOrWhiteSpace(sanitized)
-        ? header.Text ?? string.Empty
-        : $"{header.Text}: {sanitized}";
-
-      AutomationProperties.SetName(bubble, name);
-      AutomationProperties.SetName(header, header.Text ?? string.Empty);
-
-      if (header.Parent is FrameworkElement element)
-        AutomationProperties.SetName(element, name);
-    }
-
-    private void ScrollTranscriptToEnd()
-    {
-      if (this.FindName("TranscriptScrollViewer") is not ScrollViewer viewer)
-        return;
-
-      viewer.Dispatcher.BeginInvoke(new Action(() =>
-      {
-        viewer.UpdateLayout();
-        viewer.ScrollToEnd();
-      }), DispatcherPriority.Background);
-    }
-
-    private void ResetTranscript(bool includeWelcome = true)
-    {
-      if (this.FindName("Transcript") is not StackPanel transcript)
-        return;
-
-      transcript.Children.Clear();
-
-      if (!includeWelcome)
-        return;
-
-      var welcome = new TextBlock
-      {
-        Text = "Welcome to Codex for Visual Studio",
-        TextWrapping = TextWrapping.Wrap
-      };
-      welcome.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-      transcript.Children.Add(welcome);
-    }
-
-    private ExecTurn CreateExecTurn(string headerText, string normalizedCommand)
-    {
-      if (this.FindName("Transcript") is not StackPanel transcript)
-        throw new InvalidOperationException("Transcript panel missing");
-
-      var container = new Border
-      {
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(10),
-        Margin = new Thickness(20, 4, 80, 4),
-        BorderThickness = new Thickness(1),
-        MaxWidth = 600,
-        HorizontalAlignment = HorizontalAlignment.Left,
-        Visibility = Visibility.Collapsed
-      };
-      ApplyExecBubbleBrush(container);
-
-      var panel = new StackPanel();
-      var headerTextValue = string.IsNullOrWhiteSpace(headerText) ? "$ exec" : headerText.Trim();
-
-      Button CreateHeaderButton(string accessText, RoutedEventHandler handler, double minWidth, Thickness? margin = null)
-      {
-        var button = new Button
-        {
-          Content = new AccessText { Text = accessText },
-          Margin = margin ?? new Thickness(6, 0, 0, 4),
-          MinWidth = minWidth,
-          Height = 24,
-          HorizontalAlignment = HorizontalAlignment.Left
-        };
-        button.Click += handler;
-        return button;
-      }
-
-      var cancelButton = CreateHeaderButton("_Cancel", OnExecCancelClick, 70, new Thickness(8, 0, 0, 4));
-      cancelButton.Visibility = Visibility.Collapsed;
-
-      var copyButton = CreateHeaderButton("Cop_y All", OnExecCopyAllClick, 80);
-      var clearButton = CreateHeaderButton("C_lear Output", OnExecClearClick, 100);
-      var exportButton = CreateHeaderButton("_Export", OnExecExportClick, 80);
-
-      TextBlock headerBlock = null;
-
-      if (!string.IsNullOrEmpty(headerTextValue))
-      {
-        headerBlock = new TextBlock
-        {
-          Text = headerTextValue,
-          FontWeight = FontWeights.SemiBold,
-          TextWrapping = TextWrapping.Wrap,
-          Margin = new Thickness(0, 0, 0, 4),
-          VerticalAlignment = VerticalAlignment.Center
-        };
-        headerBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-
-        var headerRow = new StackPanel
-        {
-          Orientation = Orientation.Horizontal,
-          VerticalAlignment = VerticalAlignment.Center
-        };
-
-        headerRow.Children.Add(headerBlock);
-        headerRow.Children.Add(cancelButton);
-        headerRow.Children.Add(copyButton);
-        headerRow.Children.Add(clearButton);
-        headerRow.Children.Add(exportButton);
-        panel.Children.Add(headerRow);
-      }
-      else
-      {
-        var buttonRow = new StackPanel
-        {
-          Orientation = Orientation.Horizontal,
-          HorizontalAlignment = HorizontalAlignment.Left,
-          Margin = new Thickness(0, 0, 0, 4)
-        };
-        buttonRow.Children.Add(cancelButton);
-        buttonRow.Children.Add(copyButton);
-        buttonRow.Children.Add(clearButton);
-        buttonRow.Children.Add(exportButton);
-        panel.Children.Add(buttonRow);
-      }
-
-      var bodyBlock = new TextBlock
-      {
-        Text = string.Empty,
-        TextWrapping = TextWrapping.Wrap,
-        FontFamily = new FontFamily("Consolas"),
-        Visibility = Visibility.Visible
-      };
-      bodyBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
-      AttachCopyContextMenu(bodyBlock);
-
-      panel.Children.Add(bodyBlock);
-      container.Child = panel;
-      transcript.Children.Add(container);
-
-      var execTurn = new ExecTurn(container, bodyBlock, headerBlock, cancelButton, copyButton, clearButton, exportButton, normalizedCommand);
-      bodyBlock.Tag = execTurn;
-      copyButton.Tag = execTurn;
-      clearButton.Tag = execTurn;
-      exportButton.Tag = execTurn;
-      container.Tag = execTurn;
-      container.MaxHeight = _execConsolePreferredHeight;
-      container.PreviewMouseWheel += OnExecContainerPreviewMouseWheel;
-
-      _execConsoleTurns.Add(execTurn);
-      if (_execConsoleTurns.Count > 50)
-        _execConsoleTurns.RemoveAt(0);
-      ApplyExecConsoleVisibility(execTurn);
-
-      return execTurn;
-    }
-
-    private ExecTurn GetOrCreateExecTurn(string id, string header, string normalizedCommand)
-    {
-      if (string.IsNullOrEmpty(id))
-        id = RegisterExecFallbackId();
-
-      if (!_execTurns.TryGetValue(id, out var turn))
-      {
-        turn = CreateExecTurn(header, normalizedCommand);
-        _execTurns[id] = turn;
-      }
-      else if (!string.IsNullOrEmpty(header) && turn.Header != null)
-      {
-        if (string.IsNullOrEmpty(turn.Header.Text) || string.Equals(turn.Header.Text, "$ exec", StringComparison.Ordinal))
-          turn.Header.Text = header;
-      }
-
-      turn.ExecId = id;
-      if (turn.CancelButton != null)
-        turn.CancelButton.Tag = id;
-
-      if (turn.CopyButton != null)
-        turn.CopyButton.Tag = turn;
-
-      if (turn.ClearButton != null)
-        turn.ClearButton.Tag = turn;
-
-      if (turn.ExportButton != null)
-        turn.ExportButton.Tag = turn;
-
-      if (!string.IsNullOrEmpty(normalizedCommand) && string.IsNullOrEmpty(turn.NormalizedCommand))
-        turn.NormalizedCommand = normalizedCommand;
-
-      return turn;
-    }
-
-    private void ApplyExecBubbleBrush(Border container)
-    {
-      container.SetResourceReference(Border.BorderBrushProperty, VsBrushes.ToolWindowBorderKey);
-      const double opacity = 0.65;
-      if (TryFindResource(VsBrushes.CommandBarGradientBeginKey) is SolidColorBrush brush)
-      {
-        var clone = brush.Clone();
-        clone.Opacity = opacity;
-        container.Background = clone;
-      }
-      else
-      {
-        container.Background = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 255, 255, 255));
-      }
-    }
-
-    private void ApplyChatBubbleBrush(Border container, string role)
-    {
-      var key = role == "assistant" ? VsBrushes.CommandBarGradientEndKey : VsBrushes.CommandBarGradientBeginKey;
-      var opacity = role == "assistant" ? 0.88 : 0.72;
-
-      if (TryFindResource(key) is SolidColorBrush brush)
-      {
-        var clone = brush.Clone();
-        clone.Opacity = opacity;
-        container.Background = clone;
-      }
-      else
-      {
-        container.SetResourceReference(Border.BackgroundProperty, key);
-        container.Opacity = opacity;
-      }
-    }
-
-    private static string ExtractDeltaText(EventMsg evt)
-    {
-      var direct = TryGetString(evt.Raw, "text_delta");
-      if (!string.IsNullOrEmpty(direct))
-        return ChatTextUtilities.StripAnsi(direct);
-
-      var text = CollectText(evt.Raw?["delta"] ?? evt.Raw?["message"]);
-      if (!string.IsNullOrEmpty(text))
-        return ChatTextUtilities.StripAnsi(text);
-
-      text = CollectText(evt.Raw);
-      return ChatTextUtilities.StripAnsi(text);
-    }
-
-    private static IReadOnlyList<McpToolInfo> ExtractMcpTools(JObject obj)
-    {
-      var results = new List<McpToolInfo>();
-      if (obj == null)
-        return results;
-
-      var toolsToken = obj["tools"] ?? obj["items"];
-      if (toolsToken is not JArray array)
-        return results;
-
-      foreach (var token in array)
-      {
-        if (token is not JObject toolObj)
-          continue;
-
-        var name = TryGetString(toolObj, "name", "id", "tool");
-        var description = TryGetString(toolObj, "description", "summary", "detail");
-        var server = TryGetString(toolObj, "server", "provider", "source");
-        results.Add(new McpToolInfo(name, description, server));
-      }
-
-      return results;
-    }
-
-    private static IReadOnlyList<CustomPromptInfo> ExtractCustomPrompts(JObject obj)
-    {
-      var results = new List<CustomPromptInfo>();
-      if (obj == null)
-        return results;
-
-      var promptsToken = obj["prompts"] ?? obj["items"] ?? obj["data"];
-      if (promptsToken is not JArray array)
-        return results;
-
-      foreach (var token in array)
-      {
-        if (token is not JObject promptObj)
-          continue;
-
-        var id = TryGetString(promptObj, "id", "prompt_id", "promptId", "name");
-        var name = TryGetString(promptObj, "name", "title", "label");
-        var description = TryGetString(promptObj, "description", "summary", "detail", "notes");
-        var body = TryGetString(promptObj, "body", "content", "text", "prompt");
-        var source = TryGetString(promptObj, "source", "provider", "server", "scope");
-
-        results.Add(new CustomPromptInfo(id, name, description, body, source));
-      }
-
-      return results;
-    }
-
-    private static string FormatToolArguments(JObject raw)
-    {
-      if (raw == null)
-        return string.Empty;
-
-      var direct = TryGetString(raw, "arguments_preview", "input_preview", "input_summary");
-      if (!string.IsNullOrWhiteSpace(direct))
-        return direct.Trim();
-
-      var token = raw["arguments"] ?? raw["args"] ?? raw["input"] ?? raw["parameters"];
-      var text = FormatCompactText(token);
-      if (string.IsNullOrEmpty(text))
-        return string.Empty;
-
-      return text.StartsWith("Args:", StringComparison.OrdinalIgnoreCase)
-        ? text
-        : $"Args: {text}";
-    }
-
-    private static string ExtractToolOutputText(JObject raw)
-    {
-      if (raw == null)
-        return string.Empty;
-
-      var direct = TryGetString(raw, "text", "delta", "chunk", "output", "message", "value");
-      if (!string.IsNullOrWhiteSpace(direct))
-        return direct.Trim();
-
-      var token = raw["output"] ?? raw["result"] ?? raw["data"] ?? raw["response"];
-      return FormatCompactText(token);
-    }
-
-    private static string ExtractToolCompletionDetail(JObject raw)
-    {
-      if (raw == null)
-        return string.Empty;
-
-      var direct = TryGetString(raw, "detail", "message", "result_text", "result", "output", "error");
-      if (!string.IsNullOrWhiteSpace(direct))
-        return direct.Trim();
-
-      var token = raw["result"] ?? raw["output"] ?? raw["response"];
-      return FormatCompactText(token);
-    }
-
-    private static bool? InterpretToolStatus(string status)
-    {
-      if (string.IsNullOrWhiteSpace(status))
-        return null;
-
-      var normalized = status.Trim().ToLowerInvariant();
-      if (normalized is "success" or "succeeded" or "ok" or "completed" or "complete" or "done")
-        return true;
-      if (normalized is "fail" or "failed" or "error" or "errored" or "cancelled" or "canceled" or "aborted" or "timeout")
-        return false;
-      return null;
-    }
-
-    private static string FormatCompactText(JToken token, int maxLength = 200)
-    {
-      if (token == null)
-        return string.Empty;
-
-      string text = token.Type switch
-      {
-        JTokenType.String => token.ToString(),
-        JTokenType.Integer or JTokenType.Float or JTokenType.Boolean => token.ToString(),
-        _ => token.ToString(Formatting.None)
-      };
-
-      if (string.IsNullOrWhiteSpace(text))
-        return string.Empty;
-
-      text = Regex.Replace(text, "\\s+", " ").Trim();
-      if (text.Length > maxLength)
-        text = text.Substring(0, maxLength) + "...";
-      return text;
-    }
-
-    private static string ExtractFinalText(EventMsg evt)
-    {
-      var direct = TryGetString(evt.Raw, "text");
-      if (!string.IsNullOrEmpty(direct))
-        return ChatTextUtilities.StripAnsi(direct);
-
-      var text = CollectText(evt.Raw?["message"]);
-      if (!string.IsNullOrEmpty(text))
-        return ChatTextUtilities.StripAnsi(text);
-
-      text = CollectText(evt.Raw);
-      return ChatTextUtilities.StripAnsi(text);
-    }
-
-    private static string ExtractStreamErrorMessage(EventMsg evt)
-    {
-      var obj = evt.Raw;
-      string message = TryGetString(obj, "message")
-        ?? TryGetString(obj, "error")
-        ?? TryGetString(obj, "detail")
-        ?? TryGetString(obj, "description");
-
-      if (string.IsNullOrWhiteSpace(message) && obj?["error"] is JObject errorObj)
-      {
-        message = TryGetString(errorObj, "message") ?? TryGetString(errorObj, "detail");
-      }
-
-      return string.IsNullOrWhiteSpace(message) ? "Stream error" : message.Trim();
-    }
-
-    private static (int? total, int? input, int? output) ExtractTokenCounts(EventMsg evt)
-    {
-      var obj = evt.Raw ?? new JObject();
-      var total = ResolveTokenValue(obj, "total", "total_tokens");
-      var input = ResolveTokenValue(obj, "input", "prompt", "input_tokens");
-      var output = ResolveTokenValue(obj, "output", "completion", "output_tokens");
-      return (total, input, output);
-    }
-
-    private static int? ResolveTokenValue(JObject source, params string[] names)
-    {
-      if (source == null)
-        return null;
-
-      foreach (var name in names)
-      {
-        if (TryReadInt(source[name], out var value))
-          return value;
-      }
-
-      foreach (var container in new[] { "counts", "usage", "token_counts" })
-      {
-        if (source[container] is JObject nested)
-        {
-          foreach (var name in names)
-          {
-            if (TryReadInt(nested[name], out var value))
-              return value;
-          }
-        }
-      }
-
-      return null;
-    }
-
-    private static bool TryReadInt(JToken token, out int value)
-    {
-      value = 0;
-      if (token == null)
-        return false;
-      if (token.Type == JTokenType.Integer)
-      {
-        value = token.Value<int>();
-        return true;
-      }
-      if (token.Type == JTokenType.Float)
-      {
-        value = (int)Math.Round(token.Value<double>());
-        return true;
-      }
-      var text = token.ToString();
-      return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
-    }
-
-    private void UpdateTokenUsage(int? total, int? input, int? output)
-    {
-      if (this.FindName("TokenUsageText") is not TextBlock block)
-        return;
-
-      var builder = new StringBuilder();
-      if (total.HasValue)
-        builder.Append($"total {total.Value}");
-
-      var ioParts = new List<string>();
-      if (input.HasValue)
-        ioParts.Add($"in {input.Value}");
-      if (output.HasValue)
-        ioParts.Add($"out {output.Value}");
-
-      if (ioParts.Count > 0)
-      {
-        if (builder.Length > 0)
-          builder.Append(' ');
-        builder.Append('(');
-        builder.Append(string.Join(", ", ioParts));
-        builder.Append(')');
-      }
-
-      if (builder.Length == 0)
-      {
-        block.Text = string.Empty;
-        block.Visibility = Visibility.Collapsed;
-        return;
-      }
-
-      block.Text = $"Tokens: {builder}";
-      block.Visibility = Visibility.Visible;
-    }
-
-    private void ClearTokenUsage()
-    {
-      if (this.FindName("TokenUsageText") is not TextBlock block)
-        return;
-      block.Text = string.Empty;
-      block.Visibility = Visibility.Collapsed;
-    }
-
-    private void UpdateTelemetryUi()
-    {
-      if (this.FindName("TelemetryText") is not TextBlock block)
-        return;
-
-      var summary = _telemetry.GetSummary();
-      if (string.IsNullOrEmpty(summary))
-      {
-        block.Text = string.Empty;
-        block.Visibility = Visibility.Collapsed;
-      }
-      else
-      {
-        block.Text = summary;
-        block.Visibility = Visibility.Visible;
-      }
-    }
-
-    private void ShowStreamErrorBanner(string message, bool canRetry)
-    {
-      if (this.FindName("StreamErrorText") is TextBlock text)
-        text.Text = string.IsNullOrWhiteSpace(message) ? "Stream error" : message;
-      if (this.FindName("StreamRetryButton") is Button retry)
-        retry.IsEnabled = canRetry;
-      if (this.FindName("StreamErrorBanner") is Border banner)
-        banner.Visibility = Visibility.Visible;
-    }
-
-    private void HideStreamErrorBanner()
-    {
-      if (this.FindName("StreamErrorBanner") is Border banner)
-        banner.Visibility = Visibility.Collapsed;
-    }
-
-    public void AppendSelectionToInput(string text)
-    {
-      if (string.IsNullOrWhiteSpace(text)) return;
-      var box = this.FindName("InputBox") as TextBox;
-      if (box != null)
-      {
-        if (!string.IsNullOrEmpty(box.Text))
-          box.Text += "\n";
-        box.Text += text;
-        box.Focus();
-        box.CaretIndex = box.Text.Length;
-      }
-    }
-
-    private void OnInputPreviewKeyDown(object sender, KeyEventArgs e)
-    {
-      if (e.Key != Key.Enter)
-        return;
-
-      var modifiers = Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt | ModifierKeys.Windows);
-      if (modifiers != ModifierKeys.None)
-        return;
-
-      e.Handled = true;
-      var box = sender as TextBox;
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(box?.Text, fromRetry: false));
-    }
-
-    private async void OnSendClick(object sender, RoutedEventArgs e)
-    {
-      try
-      {
-        var box = this.FindName("InputBox") as TextBox;
-        await SendUserInputAsync(box?.Text, fromRetry: false);
-      }
-      catch (Exception ex)
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        await pane.WriteLineAsync($"[error] OnSendClick failed: {ex.Message}");
-      }
-    }
-
-    private async Task SendUserInputAsync(string text, bool fromRetry)
-    {
-      var payloadText = string.IsNullOrWhiteSpace(text) ? string.Empty : text.Trim();
-      if (string.IsNullOrEmpty(payloadText))
-        return;
-
-      await EnsureWorkingDirectoryUpToDateAsync(fromRetry ? "stream-retry" : "send-user-input");
-
-      var host = _host;
-      if (host == null)
-        return;
-
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-      ClearTokenUsage();
-      HideStreamErrorBanner();
-
-      if (!fromRetry)
-      {
-        _ = CreateChatBubble("user", payloadText);
-      }
-
-      var btn = this.FindName("SendButton") as Button;
-      var status = this.FindName("StatusText") as TextBlock;
-
-      var json = ChatTextUtilities.CreateUserInputSubmission(payloadText);
-      var pane = await DiagnosticsPane.GetAsync();
-      await pane.WriteLineAsync($"[debug] submission {json}");
-
-      var ok = await host.SendAsync(json);
-
-      if (!ok)
-      {
-        if (btn != null) btn.IsEnabled = true;
-        if (status != null) status.Text = "Send failed";
-        _telemetry.CancelTurn();
-        UpdateTelemetryUi();
-        UpdateStreamingIndicator(false);
-        return;
-      }
-
-      if (btn != null) btn.IsEnabled = false;
-      if (status != null) status.Text = "Streaming...";
-      UpdateStreamingIndicator(true);
-      _telemetry.BeginTurn();
-      UpdateTelemetryUi();
-      if (!fromRetry)
-        _lastUserInput = payloadText;
-
-      if (!fromRetry && this.FindName("InputBox") is TextBox input)
-        input.Clear();
-    }
-
-    private async Task<bool> SendExecCancelAsync(string execId)
-    {
-      var host = _host;
-      if (host == null || string.IsNullOrEmpty(execId))
-        return false;
-
-      var submission = new JObject
-      {
-        ["id"] = Guid.NewGuid().ToString(),
-        ["op"] = new JObject
-        {
-          ["type"] = "exec_cancel",
-          ["id"] = execId,
-          ["call_id"] = execId
-        }
-      };
-
-      var json = submission.ToString(Formatting.None);
-      var pane = await DiagnosticsPane.GetAsync();
-      await pane.WriteLineAsync($"[debug] exec cancel submission {json}");
-
-      var ok = await host.SendAsync(json);
-      if (ok)
-      {
-        await pane.WriteLineAsync($"[info] Requested cancel for exec {execId}");
-      }
-      else
-      {
-        await pane.WriteLineAsync($"[warn] Failed to send exec cancel for {execId}");
-      }
-
-      return ok;
-    }
-
-    private void OnStreamRetryClick(object sender, RoutedEventArgs e)
-    {
-      var text = _lastUserInput;
-      if (string.IsNullOrEmpty(text))
-        return;
-      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(text, fromRetry: true));
-    }
-
-    private void OnStreamDismissClick(object sender, RoutedEventArgs e)
-    {
-      HideStreamErrorBanner();
-    }
-
-    private static string CreateUserInputSubmission(string text)
-    {
-      var submission = new JObject
-      {
-        ["id"] = Guid.NewGuid().ToString(),
-        ["op"] = new JObject
-        {
-          ["type"] = "user_input",
-          ["items"] = new JArray
-          {
-            new JObject
-            {
-              ["type"] = "text",
-              ["text"] = text
-            }
-          }
-        }
-      };
-      return submission.ToString(Formatting.None);
-    }
-
-    private static async Task LogAssistantTextAsync(string text)
-    {
-      if (string.IsNullOrWhiteSpace(text))
-        return;
-
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var timestamp = DateTime.Now.ToString("HH:mm:ss");
-        await pane.WriteLineAsync($"[assistant] {timestamp} {text}");
-      }
-      catch
-      {
-        // best effort logging
-      }
-    }
-
-    private static async Task LogTelemetryAsync(string eventName, Dictionary<string, object> properties = null)
-    {
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        var timestamp = DateTime.Now.ToString("HH:mm:ss");
-        var props = properties != null ? string.Join(", ", properties.Select(kvp => $"{kvp.Key}={kvp.Value}")) : "";
-        var message = string.IsNullOrEmpty(props) ? eventName : $"{eventName} ({props})";
-        await pane.WriteLineAsync($"[telemetry] {timestamp} {message}");
-      }
-      catch
-      {
-        // best effort logging
-      }
-    }
-
-    private static async Task WriteExecDiagnosticsAsync(string text)
-    {
-      if (string.IsNullOrWhiteSpace(text))
-        return;
-
-      try
-      {
-        var pane = await DiagnosticsPane.GetAsync();
-        using var reader = new StringReader(text);
-        string line;
-        while ((line = reader.ReadLine()) != null)
-        {
-          if (string.IsNullOrWhiteSpace(line))
-            continue;
-          await pane.WriteLineAsync($"[exec] {line.TrimEnd()}");
-        }
-      }
-      catch
-      {
-        // diagnostics logging is best effort
-      }
-    }
-
-    private static string CollectText(JToken token)
-    {
-      if (token == null)
-        return string.Empty;
-
-      return token.Type switch
-      {
-        JTokenType.String => token.ToString(),
-        JTokenType.Object => CollectTextFromObject((JObject)token),
-        JTokenType.Array => string.Concat(token.Children().Select(CollectText)),
-        _ => string.Empty
-      };
-    }
-
-    private static string CollectTextFromObject(JObject obj)
-    {
-      if (obj == null)
-        return string.Empty;
-
-      if (obj["text"] is JToken textToken && textToken.Type == JTokenType.String)
-        return textToken.ToString();
-
-      if (obj["value"] is JToken valueToken && valueToken.Type == JTokenType.String)
-        return valueToken.ToString();
-
-      foreach (var key in new[] { "content", "message", "delta", "data" })
-      {
-        var child = obj[key];
-        var text = CollectText(child);
-        if (!string.IsNullOrEmpty(text))
-          return text;
-      }
-
-      return string.Empty;
-    }
-
-    private static readonly Regex Base64Regex = new(@"^[A-Za-z0-9+/=\r\n]+$", RegexOptions.Compiled);
-
-    private static string NormalizeExecChunk(string value)
-    {
-      if (string.IsNullOrEmpty(value))
-        return string.Empty;
-
-      var normalized = value.Replace("\r\n", "\n");
-      if (TryDecodeBase64Chunk(normalized, out var decoded))
-        return decoded;
-
-      return normalized;
-    }
-
-    private static bool TryDecodeBase64Chunk(string value, out string decoded)
-    {
-      decoded = string.Empty;
-      if (string.IsNullOrWhiteSpace(value))
-        return false;
-
-      var trimmed = value.Trim();
-      if (trimmed.Length < 8 || trimmed.Length % 4 != 0)
-        return false;
-      if (!Base64Regex.IsMatch(trimmed))
-        return false;
-
-      try
-      {
-        var bytes = Convert.FromBase64String(trimmed);
-        if (bytes.Length == 0)
-          return false;
-        decoded = Encoding.UTF8.GetString(bytes);
-        if (string.IsNullOrEmpty(decoded))
-          return false;
-        return true;
-      }
-      catch
-      {
-        return false;
-      }
-    }
-
-  }
-}
+using System;
+
+
+
+using System.Collections;
+
+
+
+using System.Collections.Generic;
+
+
+
+using System.Collections.ObjectModel;
+
+
+
+using System.ComponentModel;
+
+
+
+using System.Globalization;
+
+
+
+using System.IO;
+
+
+
+using System.Linq;
+
+
+
+using System.Reflection;
+
+
+
+using System.Runtime.InteropServices;
+
+
+
+using System.Text;
+
+
+
+using System.Threading;
+
+
+
+using System.Threading.Tasks;
+
+
+
+using System.Windows;
+
+
+
+using System.Windows.Automation;
+
+
+
+using System.Windows.Controls;
+
+
+
+using System.Windows.Controls.Primitives;
+
+
+
+using System.Windows.Documents;
+
+
+
+using System.Windows.Input;
+
+
+
+using System.Windows.Media;
+
+
+
+using System.Windows.Media.Animation;
+
+
+
+using Community.VisualStudio.Toolkit;
+
+
+
+using EnvDTE;
+
+
+
+using EnvDTE80;
+
+
+
+using CodexVS22.Core;
+
+
+
+using CodexVS22.Core.Protocol;
+
+
+
+// Bring nested DiffUtilities types into scope explicitly.
+
+
+
+using CodexVS22.Core;
+
+
+
+using Microsoft.VisualStudio;
+
+
+
+using Microsoft.VisualStudio.Shell;
+
+
+
+using Microsoft.VisualStudio.Shell.Interop;
+
+
+
+using Microsoft.VisualStudio.Threading;
+
+
+
+using Newtonsoft.Json;
+
+
+
+using Newtonsoft.Json.Linq;
+
+
+
+using System.Text.RegularExpressions;
+
+
+
+using System.Windows.Threading;
+
+
+
+using DteProject = EnvDTE.Project;
+
+
+
+using DteProjects = EnvDTE.Projects;
+
+
+
+using DteProjectItem = EnvDTE.ProjectItem;
+
+
+
+using DteProjectItems = EnvDTE.ProjectItems;
+
+
+
+using DteSolution = EnvDTE.Solution;
+
+
+
+
+
+
+
+namespace CodexVS22
+
+
+
+{
+
+
+
+  public partial class MyToolWindowControl : UserControl
+
+
+
+  {
+
+
+
+    private CodexCliHost _host;
+
+
+
+    private readonly Dictionary<string, AssistantTurn> _assistantTurns = new();
+
+
+
+    private readonly Dictionary<string, ExecTurn> _execTurns = new();
+
+
+
+    private readonly List<ExecTurn> _execConsoleTurns = new();
+
+
+
+    private readonly ObservableCollection<McpToolInfo> _mcpTools = new();
+
+
+
+    private readonly ObservableCollection<McpToolRun> _mcpToolRuns = new();
+
+
+
+    private readonly ObservableCollection<CustomPromptInfo> _customPrompts = new();
+
+
+
+    private readonly Dictionary<string, string> _execCommandIndex = new();
+
+
+
+    private readonly Dictionary<string, string> _execIdRemap = new();
+
+
+
+    private readonly Dictionary<string, bool> _rememberedExecApprovals = new(StringComparer.Ordinal);
+
+
+
+    private readonly Dictionary<string, bool> _rememberedPatchApprovals = new(StringComparer.Ordinal);
+
+
+
+    private readonly Queue<ApprovalRequest> _approvalQueue = new();
+
+
+
+    private ApprovalRequest _activeApproval;
+
+
+
+    private string _lastUserInput;
+
+
+
+    private CodexOptions _options;
+
+
+
+    private string _workingDir;
+
+
+
+    private bool _authKnown;
+
+
+
+    private bool _isAuthenticated;
+
+
+
+    private bool _authOperationInProgress;
+
+
+
+    private string _authMessage = string.Empty;
+
+
+
+    private bool _authGatedSend;
+
+
+
+    private string _lastExecFallbackId;
+
+
+
+    private double _execConsolePreferredHeight = 180.0;
+
+
+
+    private bool _suppressExecToggleEvent;
+
+
+
+    private IVsSolution _solutionService;
+
+
+
+    private SolutionEventsSink _solutionEvents;
+
+
+
+    private uint _solutionEventsCookie;
+
+
+
+    private bool _cliStarted;
+
+
+
+    private readonly SemaphoreSlim _workingDirLock = new(1, 1);
+
+
+
+    private static readonly string ExtensionRoot = NormalizeDirectory(AppContext.BaseDirectory);
+
+
+
+    private UIContext _solutionLoadedContext;
+
+
+
+    private UIContext _folderOpenContext;
+
+
+
+    private bool _waitingForSolutionLoad;
+
+
+
+    private string _lastKnownSolutionRoot = string.Empty;
+
+
+
+    private string _lastKnownWorkspaceRoot = string.Empty;
+
+
+
+    private static readonly TaskCompletionSource<EnvironmentSnapshot> _environmentReadySource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+
+
+    private readonly Dictionary<string, McpToolRun> _mcpToolRunIndex = new(StringComparer.Ordinal);
+
+
+
+    private readonly Dictionary<string, CustomPromptInfo> _customPromptIndex = new(StringComparer.Ordinal);
+
+
+
+    private const int MaxMcpToolRuns = 20;
+
+
+
+    private static int _environmentReadyInitialized;
+
+
+
+    private DateTime _lastMcpToolsRefresh = DateTime.MinValue;
+
+
+
+    private DateTime _lastPromptsRefresh = DateTime.MinValue;
+
+
+
+    private const int RefreshDebounceSeconds = 2;
+
+
+
+
+
+
+
+    private readonly object _heartbeatLock = new();
+
+
+
+    private Timer _heartbeatTimer;
+
+
+
+    private HeartbeatState _heartbeatState;
+
+
+
+    private int _heartbeatSending;
+
+
+
+    private bool _initializingSelectors;
+
+
+
+    private string _selectedModel = DefaultModelName;
+
+
+
+    private string _selectedReasoning = DefaultReasoningValue;
+
+
+
+    private CodexOptions.ApprovalMode _selectedApprovalMode = CodexOptions.ApprovalMode.Chat;
+
+
+
+    private System.Windows.Window _hostWindow;
+
+
+
+    private bool _windowEventsHooked;
+
+
+
+    private ObservableCollection<DiffTreeItem> _diffTreeRoots = new();
+
+
+
+    private Dictionary<string, DiffDocument> _diffDocuments = new(StringComparer.OrdinalIgnoreCase);
+
+
+
+    private bool _suppressDiffSelectionUpdate;
+
+
+
+    private int _diffTotalLeafCount;
+
+
+
+    private bool _patchApplyInProgress;
+
+
+
+    private DateTime? _patchApplyStartedAt;
+
+
+
+    private int _patchApplyExpectedFiles;
+
+
+
+    private string _lastPatchCallId = string.Empty;
+
+
+
+    private string _lastPatchSignature = string.Empty;
+
+
+
+    private static readonly string[] ModelOptions = new[]
+
+
+
+    {
+
+
+
+      "gpt-4.1",
+
+
+
+      "gpt-4.1-mini",
+
+
+
+      "o1-mini"
+
+
+
+    };
+
+
+
+
+
+
+
+    private static readonly string[] ReasoningOptions = new[]
+
+
+
+    {
+
+
+
+      "none",
+
+
+
+      "medium",
+
+
+
+      "high"
+
+
+
+    };
+
+
+
+
+
+
+
+    private static readonly CodexOptions.ApprovalMode[] ApprovalModeOptions =
+
+
+
+    {
+
+
+
+      CodexOptions.ApprovalMode.Chat,
+
+
+
+      CodexOptions.ApprovalMode.Agent,
+
+
+
+      CodexOptions.ApprovalMode.AgentFullAccess
+
+
+
+    };
+
+
+
+
+
+
+
+    private const string DefaultModelName = "gpt-4.1";
+
+
+
+    private const string DefaultReasoningValue = "medium";
+
+
+
+
+
+
+
+    private static bool IsInsideExtensionRoot(string path)
+
+
+
+    {
+
+
+
+      var normalized = NormalizeDirectory(path);
+
+
+
+      if (string.IsNullOrEmpty(normalized) || string.IsNullOrEmpty(ExtensionRoot))
+
+
+
+        return false;
+
+
+
+
+
+
+
+      return normalized.StartsWith(ExtensionRoot, StringComparison.OrdinalIgnoreCase);
+
+
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    public MyToolWindowControl()
+
+
+
+    {
+
+
+
+      InitializeComponent();
+
+
+
+    }
+
+
+
+
+
+
+
+    public static MyToolWindowControl Current { get; private set; }
+
+
+
+
+
+
+
+    private CodexCliHost CreateHost()
+
+
+
+    {
+
+
+
+      var host = new CodexCliHost();
+
+
+
+      host.OnStdoutLine += HandleStdout;
+
+
+
+      host.OnStderrLine += HandleStderr;
+
+
+
+      return host;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void DisposeHost()
+
+
+
+    {
+
+
+
+      StopHeartbeatTimer();
+
+
+
+      if (_host == null) return;
+
+
+
+      _host.OnStdoutLine -= HandleStdout;
+
+
+
+      _host.OnStderrLine -= HandleStderr;
+
+
+
+      _host.Dispose();
+
+
+
+      _host = null;
+
+
+
+      _cliStarted = false;
+
+
+
+      ClearApprovalState();
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task<bool> RestartCliAsync()
+
+
+
+    {
+
+
+
+      DisposeHost();
+
+
+
+      _rememberedExecApprovals.Clear();
+
+
+
+      _rememberedPatchApprovals.Clear();
+
+
+
+      ClearApprovalState();
+
+
+
+      _host = CreateHost();
+
+
+
+      var options = _options ?? new CodexOptions();
+
+
+
+      var dir = _workingDir ?? string.Empty;
+
+
+
+      var started = await _host.StartAsync(options, dir);
+
+
+
+      _cliStarted = started;
+
+
+
+      if (!started)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync("[error] Failed to restart Codex CLI");
+
+
+
+      }
+
+
+
+      return started;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleAgentMessageDelta(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var id = string.IsNullOrEmpty(evt.Id) ? "__unknown__" : evt.Id;
+
+
+
+        var text = ExtractDeltaText(evt);
+
+
+
+        if (string.IsNullOrEmpty(text))
+
+
+
+          return;
+
+
+
+
+
+
+
+        var turn = GetOrCreateAssistantTurn(id);
+
+
+
+        AppendAssistantText(turn, text);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleAgentMessageDelta failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleAgentMessage(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var id = string.IsNullOrEmpty(evt.Id) ? "__unknown__" : evt.Id;
+
+
+
+        var finalText = ExtractFinalText(evt);
+
+
+
+        if (!_assistantTurns.TryGetValue(id, out var turn))
+
+
+
+        {
+
+
+
+          if (string.IsNullOrEmpty(finalText))
+
+
+
+            return;
+
+
+
+          turn = GetOrCreateAssistantTurn(id);
+
+
+
+        }
+
+
+
+
+
+
+
+        if (!string.IsNullOrEmpty(finalText))
+
+
+
+        {
+
+
+
+          turn.Buffer.Clear();
+
+
+
+          AppendAssistantText(turn, finalText, isFinal: true);
+
+
+
+        }
+
+
+
+        else
+
+
+
+        {
+
+
+
+          turn.Bubble.Text = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
+
+
+
+        }
+
+
+
+
+
+
+
+        _assistantTurns.Remove(id);
+
+
+
+        await LogAssistantTextAsync(turn.Bubble.Text);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleAgentMessage failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleTokenCount(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var (total, input, output) = ExtractTokenCounts(evt);
+
+
+
+        if (total == null && input == null && output == null)
+
+
+
+          return;
+
+
+
+        UpdateTokenUsage(total, input, output);
+
+
+
+        _telemetry.RecordTokens(total, input, output);
+
+
+
+        UpdateTelemetryUi();
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleTokenCount failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleStreamError(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var message = ExtractStreamErrorMessage(evt);
+
+
+
+        ShowStreamErrorBanner(message, !string.IsNullOrEmpty(_lastUserInput));
+
+
+
+        if (!string.IsNullOrEmpty(evt.Id) && _assistantTurns.TryGetValue(evt.Id, out var turn))
+
+
+
+        {
+
+
+
+          if (!turn.Buffer.ToString().EndsWith("[stream interrupted]", StringComparison.Ordinal))
+
+
+
+          {
+
+
+
+            if (turn.Buffer.Length > 0)
+
+
+
+              turn.Buffer.AppendLine().AppendLine();
+
+
+
+            AppendAssistantText(turn, "[stream interrupted]", decorate: false);
+
+
+
+          }
+
+
+
+          _assistantTurns.Remove(evt.Id);
+
+
+
+        }
+
+
+
+
+
+
+
+        var btn = this.FindName("SendButton") as Button;
+
+
+
+        var status = this.FindName("StatusText") as TextBlock;
+
+
+
+        if (btn != null) btn.IsEnabled = true;
+
+
+
+        if (status != null) status.Text = "Stream error";
+
+
+
+        await VS.StatusBar.ShowMessageAsync("Codex stream error. You can retry.");
+
+
+
+        _telemetry.CancelTurn();
+
+
+
+        UpdateTelemetryUi();
+
+
+
+        UpdateStreamingIndicator(false);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleStreamError failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleApplyPatchApproval(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var host = _host;
+
+
+
+        if (host == null)
+
+
+
+          return;
+
+
+
+
+
+
+
+        var raw = evt.Raw ?? new JObject();
+
+
+
+        var signature = BuildPatchSignature(raw);
+
+
+
+        var callId = TryGetString(raw, "call_id") ?? evt.Id ?? string.Empty;
+
+
+
+        if (string.IsNullOrEmpty(callId))
+
+
+
+          return;
+
+
+
+
+
+
+
+        var options = _options ?? new CodexOptions();
+
+
+
+        EnqueueFullAccessBannerRefresh();
+
+
+
+        _lastPatchCallId = callId;
+
+
+
+        _lastPatchSignature = signature ?? string.Empty;
+
+
+
+        if (TryResolvePatchApproval(options.Mode, signature, out var autoApproved, out var autoReason))
+
+
+
+        {
+
+
+
+          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(callId, autoApproved));
+
+
+
+          if (autoApproved)
+
+
+
+            await ApplySelectedDiffsAsync();
+
+
+
+          await LogAutoApprovalAsync("patch", signature, autoApproved, autoReason);
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Codex patch {(autoApproved ? "approved" : "denied")} ({autoReason}).");
+
+
+
+          return;
+
+
+
+        }
+
+
+
+
+
+
+
+        var summary = TryGetString(raw, "summary") ?? "Apply patch from Codex?";
+
+
+
+        var canRemember = !string.IsNullOrEmpty(signature) && ShouldOfferRemember(signature);
+
+
+
+        EnqueueApprovalRequest(new ApprovalRequest(ApprovalKind.Patch, callId, summary, signature, canRemember));
+
+
+
+        await VS.StatusBar.ShowMessageAsync("Codex awaiting patch approval.");
+
+
+
+        return;
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleApplyPatchApproval failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandlePatchApplyBegin(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var raw = evt.Raw ?? new JObject();
+
+
+
+        var summary = TryGetString(raw, "summary") ?? "Applying Codex patch...";
+
+
+
+        var total = TryGetInt(raw, "total", "count", "files") ?? 0;
+
+
+
+        await BeginPatchApplyProgressAsync(summary, total);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandlePatchApplyBegin failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandlePatchApplyEnd(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var raw = evt.Raw ?? new JObject();
+
+
+
+        var success = TryGetBoolean(raw, "success", "ok", "completed") ?? true;
+
+
+
+        var applied = TryGetInt(raw, "applied", "succeeded", "files_applied") ?? 0;
+
+
+
+        var failed = TryGetInt(raw, "failed", "errors", "files_failed") ?? 0;
+
+
+
+        var message = TryGetString(raw, "message") ?? TryGetString(raw, "description");
+
+
+
+        await CompletePatchApplyProgressAsync(success, applied, failed, message);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandlePatchApplyEnd failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void HandleTaskComplete(EventMsg evt)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        var btn = this.FindName("SendButton") as Button;
+
+
+
+        var status = this.FindName("StatusText") as TextBlock;
+
+
+
+        if (btn != null) btn.IsEnabled = true;
+
+
+
+        if (status != null) status.Text = string.Empty;
+
+
+
+        HideStreamErrorBanner();
+
+
+
+        UpdateStreamingIndicator(false);
+
+
+
+        _telemetry.CompleteTurn();
+
+
+
+        UpdateTelemetryUi();
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] HandleTaskComplete failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void HandleStdout(string line)
+
+
+
+    {
+
+
+
+      var evt = EventParser.Parse(line);
+
+
+
+      switch (evt.Kind)
+
+
+
+      {
+
+
+
+        case EventKind.SessionConfigured:
+
+
+
+          CodexVS22.Core.CodexCliHost.LastRolloutPath = TryGetString(evt.Raw, "rollout_path");
+
+
+
+          ConfigureHeartbeat(evt);
+
+
+
+          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("session-configured"));
+
+
+
+          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("session-configured"));
+
+
+
+          break;
+
+
+
+        case EventKind.AgentMessageDelta:
+
+
+
+          HandleAgentMessageDelta(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.AgentMessage:
+
+
+
+          HandleAgentMessage(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.TokenCount:
+
+
+
+          HandleTokenCount(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.StreamError:
+
+
+
+          HandleStreamError(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ApplyPatchApprovalRequest:
+
+
+
+          HandleApplyPatchApproval(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ExecApprovalRequest:
+
+
+
+          HandleExecApproval(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ExecCommandBegin:
+
+
+
+          HandleExecCommandBegin(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ExecCommandOutputDelta:
+
+
+
+          HandleExecCommandOutputDelta(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ExecCommandEnd:
+
+
+
+          HandleExecCommandEnd(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ListMcpTools:
+
+
+
+          HandleListMcpTools(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ListCustomPrompts:
+
+
+
+          HandleListCustomPrompts(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ToolCallBegin:
+
+
+
+          HandleToolCallBegin(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ToolCallOutput:
+
+
+
+          HandleToolCallOutput(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.ToolCallEnd:
+
+
+
+          HandleToolCallEnd(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.TurnDiff:
+
+
+
+          HandleTurnDiff(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.PatchApplyBegin:
+
+
+
+          HandlePatchApplyBegin(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.PatchApplyEnd:
+
+
+
+          HandlePatchApplyEnd(evt);
+
+
+
+          break;
+
+
+
+        case EventKind.TaskComplete:
+
+
+
+          HandleTaskComplete(evt);
+
+
+
+          break;
+
+
+
+        default:
+
+
+
+          break;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnClearClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (System.Windows.MessageBox.Show("Clear chat?", "Codex", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+
+
+
+      {
+
+
+
+        ResetTranscript();
+
+
+
+        if (this.FindName("InputBox") is TextBox box) box.Clear();
+
+
+
+        _assistantTurns.Clear();
+
+
+
+        _execTurns.Clear();
+
+
+
+        _execConsoleTurns.Clear();
+
+
+
+        _execCommandIndex.Clear();
+
+
+
+        _execIdRemap.Clear();
+
+
+
+        _rememberedExecApprovals.Clear();
+
+
+
+        _rememberedPatchApprovals.Clear();
+
+
+
+        _mcpToolRuns.Clear();
+
+
+
+        _mcpToolRunIndex.Clear();
+
+
+
+        UpdateMcpToolRunsUi();
+
+
+
+        ClearApprovalState(hideBanner: false);
+
+
+
+        ShowApprovalBanner(null);
+
+
+
+        _lastExecFallbackId = null;
+
+
+
+        _lastUserInput = string.Empty;
+
+
+
+        _assistantChunkCounter = 0;
+
+
+
+        _telemetry.Reset();
+
+
+
+        ClearTokenUsage();
+
+
+
+        HideStreamErrorBanner();
+
+
+
+        UpdateStreamingIndicator(false);
+
+
+
+        FocusInputBox();
+
+
+
+        UpdateTelemetryUi();
+
+
+
+        ScrollTranscriptToEnd();
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    public sealed class DiffTreeItem : INotifyPropertyChanged
+
+
+
+    {
+
+
+
+      private readonly Action<DiffTreeItem> _onCheckChanged;
+
+
+
+      private bool? _isChecked = true;
+
+
+
+      private bool _isExpanded;
+
+
+
+      private bool _isUpdating;
+
+
+
+
+
+
+
+      public DiffTreeItem(string name, string relativePath, bool isDirectory, DiffDocument document, Action<DiffTreeItem> onCheckChanged)
+
+
+
+      {
+
+
+
+        Name = string.IsNullOrWhiteSpace(name) ? "(file)" : name;
+
+
+
+        RelativePath = relativePath ?? string.Empty;
+
+
+
+        IsDirectory = isDirectory;
+
+
+
+        Document = document;
+
+
+
+        _onCheckChanged = onCheckChanged;
+
+
+
+        Children = new ObservableCollection<DiffTreeItem>();
+
+
+
+        _isExpanded = isDirectory;
+
+
+
+      }
+
+
+
+
+
+
+
+      public event PropertyChangedEventHandler PropertyChanged;
+
+
+
+
+
+
+
+      public string Name { get; }
+
+
+
+      public string RelativePath { get; }
+
+
+
+      public bool IsDirectory { get; }
+
+
+
+      public DiffDocument Document { get; private set; }
+
+
+
+      public ObservableCollection<DiffTreeItem> Children { get; }
+
+
+
+      public DiffTreeItem Parent { get; private set; }
+
+
+
+
+
+
+
+      public bool? IsChecked
+
+
+
+      {
+
+
+
+        get => _isChecked;
+
+
+
+        set => SetIsChecked(value, updateChildren: true, updateParent: true);
+
+
+
+      }
+
+
+
+
+
+
+
+      public bool IsExpanded
+
+
+
+      {
+
+
+
+        get => _isExpanded;
+
+
+
+        set
+
+
+
+        {
+
+
+
+          if (_isExpanded == value)
+
+
+
+            return;
+
+
+
+          _isExpanded = value;
+
+
+
+          OnPropertyChanged(nameof(IsExpanded));
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      internal void SetParent(DiffTreeItem parent)
+
+
+
+      {
+
+
+
+        Parent = parent;
+
+
+
+      }
+
+
+
+
+
+
+
+      internal void SetDocument(DiffDocument document)
+
+
+
+      {
+
+
+
+        if (document == null)
+
+
+
+          return;
+
+
+
+        Document = document;
+
+
+
+      }
+
+
+
+
+
+
+
+      internal void SetIsChecked(bool? value, bool updateChildren, bool updateParent)
+
+
+
+      {
+
+
+
+        if (_isUpdating)
+
+
+
+          return;
+
+
+
+
+
+
+
+        if (_isChecked == value)
+
+
+
+        {
+
+
+
+          if (updateChildren && value.HasValue && IsDirectory)
+
+
+
+          {
+
+
+
+            foreach (var child in Children)
+
+
+
+              child.SetIsChecked(value, updateChildren: true, updateParent: false);
+
+
+
+          }
+
+
+
+          return;
+
+
+
+        }
+
+
+
+
+
+
+
+        _isUpdating = true;
+
+
+
+        try
+
+
+
+        {
+
+
+
+          _isChecked = value;
+
+
+
+          OnPropertyChanged(nameof(IsChecked));
+
+
+
+
+
+
+
+          if (updateChildren && value.HasValue && IsDirectory)
+
+
+
+          {
+
+
+
+            foreach (var child in Children)
+
+
+
+              child.SetIsChecked(value, updateChildren: true, updateParent: false);
+
+
+
+          }
+
+
+
+
+
+
+
+          if (updateParent && Parent != null)
+
+
+
+            Parent.SynchronizeCheckStateFromChildren();
+
+
+
+        }
+
+
+
+        finally
+
+
+
+        {
+
+
+
+          _isUpdating = false;
+
+
+
+        }
+
+
+
+
+
+
+
+        _onCheckChanged?.Invoke(this);
+
+
+
+      }
+
+
+
+
+
+
+
+      internal void SynchronizeCheckStateFromChildren()
+
+
+
+      {
+
+
+
+        if (!IsDirectory || Children.Count == 0)
+
+
+
+          return;
+
+
+
+
+
+
+
+        var allChecked = true;
+
+
+
+        var allUnchecked = true;
+
+
+
+
+
+
+
+        foreach (var child in Children)
+
+
+
+        {
+
+
+
+          var state = child.IsChecked;
+
+
+
+          if (state != true)
+
+
+
+            allChecked = false;
+
+
+
+          if (state != false)
+
+
+
+            allUnchecked = false;
+
+
+
+          if (!allChecked && !allUnchecked)
+
+
+
+            break;
+
+
+
+        }
+
+
+
+
+
+
+
+        bool? newValue = allChecked ? true : allUnchecked ? false : (bool?)null;
+
+
+
+        if (_isChecked != newValue)
+
+
+
+        {
+
+
+
+          _isChecked = newValue;
+
+
+
+          OnPropertyChanged(nameof(IsChecked));
+
+
+
+          _onCheckChanged?.Invoke(this);
+
+
+
+        }
+
+
+
+
+
+
+
+        Parent?.SynchronizeCheckStateFromChildren();
+
+
+
+      }
+
+
+
+
+
+
+
+      private void OnPropertyChanged(string propertyName)
+
+
+
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+
+
+    }
+
+
+
+
+
+
+
+    private static (List<DiffTreeItem> roots, int leafCount) BuildDiffTree(
+
+
+
+      IReadOnlyList<DiffDocument> docs,
+
+
+
+      Action<DiffTreeItem> onCheckChanged)
+
+
+
+    {
+
+
+
+      var roots = new List<DiffTreeItem>();
+
+
+
+      var map = new Dictionary<string, DiffTreeItem>(StringComparer.OrdinalIgnoreCase);
+
+
+
+      var leaves = 0;
+
+
+
+
+
+
+
+      foreach (var doc in docs)
+
+
+
+      {
+
+
+
+        var normalizedPath = NormalizeDiffPath(doc.Path);
+
+
+
+        var segments = SplitDiffPath(normalizedPath);
+
+
+
+        if (segments.Length == 0)
+
+
+
+          segments = new[] { string.IsNullOrEmpty(normalizedPath) ? "codex.diff" : normalizedPath };
+
+
+
+
+
+
+
+        DiffTreeItem parent = null;
+
+
+
+        string key = string.Empty;
+
+
+
+
+
+
+
+        for (var i = 0; i < segments.Length; i++)
+
+
+
+        {
+
+
+
+          var segment = segments[i];
+
+
+
+          var isLast = i == segments.Length - 1;
+
+
+
+          key = string.IsNullOrEmpty(key) ? segment : $"{key}/{segment}";
+
+
+
+
+
+
+
+          if (!map.TryGetValue(key, out var node))
+
+
+
+          {
+
+
+
+            var relativePath = string.IsNullOrEmpty(normalizedPath) ? segment : key;
+
+
+
+            var document = isLast ? doc : null;
+
+
+
+            node = new DiffTreeItem(segment, relativePath, !isLast, document, onCheckChanged);
+
+
+
+            if (parent == null)
+
+
+
+              InsertDiffNodeInOrder(roots, node);
+
+
+
+            else
+
+
+
+              InsertDiffNodeInOrder(parent.Children, node);
+
+
+
+
+
+
+
+            node.SetParent(parent);
+
+
+
+            map[key] = node;
+
+
+
+          }
+
+
+
+          else if (isLast)
+
+
+
+          {
+
+
+
+            node.SetDocument(doc);
+
+
+
+          }
+
+
+
+
+
+
+
+          if (isLast)
+
+
+
+            leaves++;
+
+
+
+
+
+
+
+          parent = node;
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      return (roots, leaves);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void InsertDiffNodeInOrder(IList<DiffTreeItem> collection, DiffTreeItem node)
+
+
+
+    {
+
+
+
+      var index = 0;
+
+
+
+      while (index < collection.Count && CompareDiffNodes(collection[index], node) <= 0)
+
+
+
+        index++;
+
+
+
+      collection.Insert(index, node);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static int CompareDiffNodes(DiffTreeItem left, DiffTreeItem right)
+
+
+
+    {
+
+
+
+      if (left == null && right == null)
+
+
+
+        return 0;
+
+
+
+      if (left == null)
+
+
+
+        return 1;
+
+
+
+      if (right == null)
+
+
+
+        return -1;
+
+
+
+      if (left.IsDirectory != right.IsDirectory)
+
+
+
+        return left.IsDirectory ? -1 : 1;
+
+
+
+      return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string NormalizeDiffPath(string path)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(path))
+
+
+
+        return "codex.diff";
+
+
+
+
+
+
+
+      var normalized = path.Replace('\\', '/').Trim();
+
+
+
+      while (normalized.StartsWith("./", StringComparison.Ordinal))
+
+
+
+        normalized = normalized.Length > 2 ? normalized.Substring(2) : string.Empty;
+
+
+
+      normalized = normalized.Trim('/');
+
+
+
+      if (string.IsNullOrWhiteSpace(normalized))
+
+
+
+        normalized = Path.GetFileName(path) ?? "codex.diff";
+
+
+
+      return normalized;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string[] SplitDiffPath(string normalizedPath)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(normalizedPath))
+
+
+
+        return Array.Empty<string>();
+
+
+
+      return normalizedPath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void HandleDiffSelectionChanged(DiffTreeItem _)
+
+
+
+    {
+
+
+
+      if (_suppressDiffSelectionUpdate)
+
+
+
+        return;
+
+
+
+      UpdateDiffSelectionSummary();
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateDiffSelectionSummary()
+
+
+
+    {
+
+
+
+      if (_suppressDiffSelectionUpdate)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (this.FindName("DiffSelectionSummary") is not TextBlock summary)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (_diffTreeRoots == null || _diffTreeRoots.Count == 0)
+
+
+
+      {
+
+
+
+        summary.Text = string.Empty;
+
+
+
+        summary.Visibility = Visibility.Collapsed;
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      var (selected, total) = CountSelectedDiffFiles();
+
+
+
+      if (total == 0)
+
+
+
+      {
+
+
+
+        summary.Text = string.Empty;
+
+
+
+        summary.Visibility = Visibility.Collapsed;
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      summary.Text = $"Selected {selected} of {total} files.";
+
+
+
+      summary.Visibility = Visibility.Visible;
+
+
+
+    }
+
+
+
+
+
+
+
+    private (int selected, int total) CountSelectedDiffFiles()
+
+
+
+    {
+
+
+
+      var selected = 0;
+
+
+
+      var total = 0;
+
+
+
+
+
+
+
+      foreach (var root in _diffTreeRoots)
+
+
+
+        AccumulateDiffLeafCounts(root, ref selected, ref total);
+
+
+
+
+
+
+
+      return (selected, total);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void AccumulateDiffLeafCounts(DiffTreeItem item, ref int selected, ref int total)
+
+
+
+    {
+
+
+
+      if (item == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (!item.IsDirectory)
+
+
+
+      {
+
+
+
+        total++;
+
+
+
+        if (item.IsChecked == true)
+
+
+
+          selected++;
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      foreach (var child in item.Children)
+
+
+
+        AccumulateDiffLeafCounts(child, ref selected, ref total);
+
+
+
+    }
+
+
+
+
+
+
+
+    private IReadOnlyList<DiffDocument> GetSelectedDiffDocuments()
+
+
+
+    {
+
+
+
+      var results = new List<DiffDocument>();
+
+
+
+      foreach (var root in _diffTreeRoots)
+
+
+
+        CollectSelectedDocuments(root, results);
+
+
+
+
+
+
+
+      if (results.Count == 0 && _diffDocuments.Count > 0)
+
+
+
+        results.AddRange(_diffDocuments.Values);
+
+
+
+
+
+
+
+      return results;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void CollectSelectedDocuments(DiffTreeItem item, ICollection<DiffDocument> results)
+
+
+
+    {
+
+
+
+      if (item == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (!item.IsDirectory)
+
+
+
+      {
+
+
+
+        if (item.IsChecked == true && item.Document != null)
+
+
+
+          results.Add(item.Document);
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      foreach (var child in item.Children)
+
+
+
+        CollectSelectedDocuments(child, results);
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task<bool> TryDiscardPendingPatchAsync()
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      if (_activeApproval?.Kind == ApprovalKind.Patch)
+
+
+
+      {
+
+
+
+        await ResolveActiveApprovalAsync(false);
+
+
+
+        return true;
+
+
+
+      }
+
+
+
+
+
+
+
+      if (_approvalQueue.Count == 0)
+
+
+
+        return false;
+
+
+
+
+
+
+
+      var handled = false;
+
+
+
+      var pending = new Queue<ApprovalRequest>();
+
+
+
+      var host = _host;
+
+
+
+
+
+
+
+      while (_approvalQueue.Count > 0)
+
+
+
+      {
+
+
+
+        var request = _approvalQueue.Dequeue();
+
+
+
+        if (!handled && request.Kind == ApprovalKind.Patch)
+
+
+
+        {
+
+
+
+          if (host != null)
+
+
+
+            await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(request.CallId, false));
+
+
+
+          await LogManualApprovalAsync("patch", request.Signature, false);
+
+
+
+          handled = true;
+
+
+
+          continue;
+
+
+
+        }
+
+
+
+
+
+
+
+        pending.Enqueue(request);
+
+
+
+      }
+
+
+
+
+
+
+
+      while (pending.Count > 0)
+
+
+
+        _approvalQueue.Enqueue(pending.Dequeue());
+
+
+
+
+
+
+
+      if (handled)
+
+
+
+      {
+
+
+
+        await DisplayNextApprovalAsync();
+
+
+
+        _lastPatchCallId = string.Empty;
+
+
+
+        _lastPatchSignature = string.Empty;
+
+
+
+      }
+
+
+
+
+
+
+
+      return handled;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task DiscardPatchAsync()
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      if (_patchApplyInProgress)
+
+
+
+      {
+
+
+
+        await VS.StatusBar.ShowMessageAsync("Codex patch is currently applying. Please wait for completion.");
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      var handled = await TryDiscardPendingPatchAsync();
+
+
+
+
+
+
+
+      if (!handled && !string.IsNullOrEmpty(_lastPatchCallId))
+
+
+
+      {
+
+
+
+        var host = _host;
+
+
+
+        if (host != null)
+
+
+
+        {
+
+
+
+          await host.SendAsync(ApprovalSubmissionFactory.CreatePatch(_lastPatchCallId, false));
+
+
+
+          await LogManualApprovalAsync("patch", _lastPatchSignature, false);
+
+
+
+        }
+
+
+
+        handled = true;
+
+
+
+      }
+
+
+
+
+
+
+
+      if (!handled && (_diffTreeRoots == null || _diffTreeRoots.Count == 0))
+
+
+
+      {
+
+
+
+        await VS.StatusBar.ShowMessageAsync("No Codex patch to discard.");
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      await CompletePatchApplyProgressAsync(false, 0, 0, handled ? "Codex patch discarded." : "Codex patch dismissed.", recordTelemetry: false);
+
+
+
+      await UpdateDiffTreeAsync(Array.Empty<DiffDocument>());
+
+
+
+      _lastPatchCallId = string.Empty;
+
+
+
+      _lastPatchSignature = string.Empty;
+
+
+
+      await VS.StatusBar.ShowMessageAsync("Codex patch discarded.");
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnDiscardPatchClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await DiscardPatchAsync();
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] Discard patch failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task BeginPatchApplyProgressAsync(string summary, int totalFiles)
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      _patchApplyInProgress = true;
+
+
+
+      _patchApplyStartedAt = DateTime.UtcNow;
+
+
+
+      _patchApplyExpectedFiles = Math.Max(totalFiles, 0);
+
+
+
+      _telemetry.BeginPatch();
+
+
+
+
+
+
+
+      if (string.IsNullOrWhiteSpace(summary))
+
+
+
+        summary = _patchApplyExpectedFiles > 0
+
+
+
+          ? $"Applying Codex patch ({_patchApplyExpectedFiles} files)..."
+
+
+
+          : "Applying Codex patch...";
+
+
+
+
+
+
+
+      if (this.FindName("StatusText") is TextBlock status)
+
+
+
+        status.Text = summary;
+
+
+
+
+
+
+
+      if (this.FindName("DiscardPatchButton") is Button discardButton)
+
+
+
+        discardButton.IsEnabled = false;
+
+
+
+
+
+
+
+      await VS.StatusBar.ShowMessageAsync(summary);
+
+
+
+      UpdateTelemetryUi();
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[patch] begin: {summary}");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // diagnostics are best effort
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task CompletePatchApplyProgressAsync(bool success, int applied, int failed, string messageOverride = null, bool recordTelemetry = true)
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      var elapsed = _patchApplyStartedAt.HasValue
+
+
+
+        ? (DateTime.UtcNow - _patchApplyStartedAt.Value).TotalSeconds
+
+
+
+        : (double?)null;
+
+
+
+
+
+
+
+      _patchApplyInProgress = false;
+
+
+
+      _patchApplyStartedAt = null;
+
+
+
+      _patchApplyExpectedFiles = 0;
+
+
+
+      _lastPatchCallId = string.Empty;
+
+
+
+      _lastPatchSignature = string.Empty;
+
+
+
+
+
+
+
+      if (applied < 0) applied = 0;
+
+
+
+      if (failed < 0) failed = 0;
+
+
+
+
+
+
+
+      string message = string.IsNullOrWhiteSpace(messageOverride) ? null : messageOverride.Trim();
+
+
+
+      if (string.IsNullOrEmpty(message))
+
+
+
+      {
+
+
+
+        var duration = elapsed.HasValue ? $" in {elapsed.Value:F1}s" : string.Empty;
+
+
+
+        if (success)
+
+
+
+        {
+
+
+
+          var filesPart = applied > 0 ? $"{applied} file{(applied == 1 ? string.Empty : "s")}" : "files";
+
+
+
+          message = $"Codex patch applied ({filesPart}{duration}).";
+
+
+
+        }
+
+
+
+        else
+
+
+
+        {
+
+
+
+          var appliedPart = applied > 0 ? $"{applied} applied" : "0 applied";
+
+
+
+          var failedPart = failed > 0 ? $", {failed} failed" : string.Empty;
+
+
+
+          message = $"Codex patch failed ({appliedPart}{failedPart}{duration}).";
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      if (this.FindName("StatusText") is TextBlock status)
+
+
+
+        status.Text = message;
+
+
+
+
+
+
+
+      if (this.FindName("DiscardPatchButton") is Button discardButton)
+
+
+
+        discardButton.IsEnabled = true;
+
+
+
+
+
+
+
+      await VS.StatusBar.ShowMessageAsync(message);
+
+
+
+
+
+
+
+      if (recordTelemetry)
+
+
+
+      {
+
+
+
+        var duration = elapsed ?? 0.0;
+
+
+
+        _telemetry.CompletePatch(success, duration);
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        _telemetry.CancelPatch();
+
+
+
+      }
+
+
+
+      UpdateTelemetryUi();
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        var state = success ? "success" : "failure";
+
+
+
+        await pane.WriteLineAsync($"[patch] {state}: applied={applied}, failed={failed}{(elapsed.HasValue ? $", elapsed={elapsed.Value:F2}s" : string.Empty)}");
+
+
+
+        if (!string.IsNullOrEmpty(messageOverride))
+
+
+
+          await pane.WriteLineAsync($"[patch] detail: {messageOverride}");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // diagnostics best effort
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task<bool> ApplySelectedDiffsAsync()
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      var documents = GetSelectedDiffDocuments();
+
+
+
+      if (documents == null || documents.Count == 0)
+
+
+
+      {
+
+
+
+        await VS.StatusBar.ShowMessageAsync("No files selected for Codex patch.");
+
+
+
+        return false;
+
+
+
+      }
+
+
+
+
+
+
+
+      var applySummary = documents.Count == 1
+
+
+
+        ? $"Applying Codex patch to {documents[0].Path}..."
+
+
+
+        : $"Applying Codex patch ({documents.Count} files)...";
+
+
+
+
+
+
+
+      await BeginPatchApplyProgressAsync(applySummary, documents.Count);
+
+
+
+
+
+
+
+      var applied = 0;
+
+
+
+      var failures = new List<string>();
+
+
+
+      var conflicts = new List<string>();
+
+
+
+      var openDocuments = _options?.AutoOpenPatchedFiles ?? true;
+
+
+
+
+
+
+
+      foreach (var document in documents)
+
+
+
+      {
+
+
+
+        if (document == null || string.IsNullOrEmpty(document.Modified))
+
+
+
+        {
+
+
+
+          failures.Add(document?.Path ?? "(unknown)");
+
+
+
+          continue;
+
+
+
+        }
+
+
+
+
+
+
+
+        var fullPath = ResolveDiffFullPath(document.Path);
+
+
+
+        if (string.IsNullOrEmpty(fullPath))
+
+
+
+        {
+
+
+
+          failures.Add(document.Path);
+
+
+
+          continue;
+
+
+
+        }
+
+
+
+
+
+
+
+        try
+
+
+
+        {
+
+
+
+          var result = await ApplyDocumentTextAsync(fullPath, document, openDocuments);
+
+
+
+          switch (result)
+
+
+
+          {
+
+
+
+            case PatchApplyResult.Applied:
+
+
+
+              applied++;
+
+
+
+              break;
+
+
+
+            case PatchApplyResult.Conflict:
+
+
+
+              conflicts.Add(fullPath);
+
+
+
+              break;
+
+
+
+            default:
+
+
+
+              failures.Add(fullPath);
+
+
+
+              break;
+
+
+
+          }
+
+
+
+        }
+
+
+
+        catch (Exception ex)
+
+
+
+        {
+
+
+
+          failures.Add($"{fullPath}: {ex.Message}");
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      if (failures.Count > 0 || conflicts.Count > 0)
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          var pane = await DiagnosticsPane.GetAsync();
+
+
+
+          foreach (var failure in failures)
+
+
+
+            await pane.WriteLineAsync($"[error] Failed to apply Codex patch: {failure}");
+
+
+
+          foreach (var conflict in conflicts)
+
+
+
+            await pane.WriteLineAsync($"[warn] Patch conflict for {conflict}; file differs from expected base. Manual merge recommended.");
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          // diagnostics best effort
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      var success = failures.Count == 0 && conflicts.Count == 0;
+
+
+
+      string messageOverride = null;
+
+
+
+      if (!success)
+
+
+
+      {
+
+
+
+        if (conflicts.Count > 0 && failures.Count == 0)
+
+
+
+        {
+
+
+
+          messageOverride = conflicts.Count == 1
+
+
+
+            ? "Codex patch encountered a conflict; please merge manually."
+
+
+
+            : $"Codex patch encountered {conflicts.Count} conflicts; please merge manually.";
+
+
+
+        }
+
+
+
+        else if (conflicts.Count > 0)
+
+
+
+        {
+
+
+
+          messageOverride = $"Codex patch completed with {conflicts.Count} conflicts and {failures.Count} errors.";
+
+
+
+        }
+
+
+
+        else if (failures.Count > 0)
+
+
+
+        {
+
+
+
+          messageOverride = failures.Count == 1
+
+
+
+            ? "Codex patch failed for 1 file."
+
+
+
+            : $"Codex patch failed for {failures.Count} files.";
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      await CompletePatchApplyProgressAsync(success, applied, failures.Count + conflicts.Count, messageOverride);
+
+
+
+
+
+
+
+      return success;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task<PatchApplyResult> ApplyDocumentTextAsync(string fullPath, DiffDocument document, bool openDocument)
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      if (string.IsNullOrWhiteSpace(fullPath))
+
+
+
+        return PatchApplyResult.Failed;
+
+
+
+
+
+
+
+      var normalizedPath = NormalizeDirectory(fullPath);
+
+
+
+      var directory = Path.GetDirectoryName(normalizedPath);
+
+
+
+      if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+
+
+
+        Directory.CreateDirectory(directory);
+
+
+
+
+
+
+
+      if (!File.Exists(normalizedPath))
+
+
+
+        File.WriteAllText(normalizedPath, string.Empty, Encoding.UTF8);
+
+
+
+
+
+
+
+      if (IsFileReadOnly(normalizedPath))
+
+
+
+      {
+
+
+
+        await LogPatchReadOnlyAsync(normalizedPath);
+
+
+
+        return PatchApplyResult.Failed;
+
+
+
+      }
+
+
+
+
+
+
+
+      DocumentView documentView = null;
+
+
+
+      if (openDocument)
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          documentView = await VS.Documents.OpenAsync(normalizedPath);
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          documentView = null;
+
+
+
+        }
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          documentView = await VS.Documents.GetDocumentViewAsync(normalizedPath);
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          documentView = null;
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      var buffer = documentView?.TextBuffer;
+
+
+
+      var newText = DiffUtilities.NormalizeFileContent(document?.Modified ?? string.Empty);
+
+
+
+
+
+
+
+      var currentText = buffer != null
+
+
+
+        ? buffer.CurrentSnapshot.GetText()
+
+
+
+        : File.Exists(normalizedPath) ? File.ReadAllText(normalizedPath) : string.Empty;
+
+
+
+
+
+
+
+      if (!string.IsNullOrEmpty(document?.Original))
+
+
+
+      {
+
+
+
+        var normalizedCurrent = DiffUtilities.NormalizeForComparison(currentText);
+
+
+
+        var normalizedOriginal = DiffUtilities.NormalizeForComparison(document.Original);
+
+
+
+        if (!string.Equals(normalizedCurrent, normalizedOriginal, StringComparison.Ordinal))
+
+
+
+        {
+
+
+
+          return PatchApplyResult.Conflict;
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+
+
+
+
+      if (buffer != null)
+
+
+
+      {
+
+
+
+        using var edit = buffer.CreateEdit();
+
+
+
+        edit.Replace(0, buffer.CurrentSnapshot.Length, newText);
+
+
+
+        var appliedSnapshot = edit.Apply();
+
+        if (appliedSnapshot == null)
+
+          return PatchApplyResult.Failed;
+
+
+
+          return PatchApplyResult.Failed;
+
+
+
+
+
+
+
+        if (!openDocument && documentView?.WindowFrame == null)
+
+
+
+        {
+
+
+
+          try
+
+
+
+          {
+
+
+
+            File.WriteAllText(normalizedPath, buffer.CurrentSnapshot.GetText(), Encoding.UTF8);
+
+
+
+          }
+
+
+
+          catch
+
+
+
+          {
+
+
+
+            // if writing fails, keep buffer dirty and continue
+
+
+
+          }
+
+
+
+        }
+
+
+
+        return PatchApplyResult.Applied;
+
+
+
+      }
+
+
+
+
+
+
+
+      File.WriteAllText(normalizedPath, newText, Encoding.UTF8);
+
+
+
+
+
+
+
+      if (openDocument)
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          await VS.Documents.OpenAsync(normalizedPath);
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          // best effort
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      return PatchApplyResult.Applied;
+
+
+
+    }
+
+
+
+
+
+
+
+    private string ResolveDiffFullPath(string path)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(path))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      if (Path.IsPathRooted(path))
+
+
+
+        return NormalizeDirectory(path);
+
+
+
+
+
+
+
+      var relative = ConvertDiffPathToPlatform(path);
+
+
+
+
+
+
+
+      foreach (var baseDir in new[] { _workingDir, _lastKnownWorkspaceRoot, _lastKnownSolutionRoot })
+
+
+
+      {
+
+
+
+        var candidate = CombineWithBaseDirectory(baseDir, relative);
+
+
+
+        if (!string.IsNullOrEmpty(candidate) && (File.Exists(candidate) || Directory.Exists(Path.GetDirectoryName(candidate) ?? string.Empty)))
+
+
+
+          return candidate;
+
+
+
+      }
+
+
+
+
+
+
+
+      var fallback = CombineWithBaseDirectory(_workingDir, relative);
+
+
+
+      return string.IsNullOrEmpty(fallback) ? NormalizeDirectory(relative) : fallback;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CombineWithBaseDirectory(string baseDir, string relativePath)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(relativePath))
+
+
+
+        return string.Empty;
+
+
+
+      if (string.IsNullOrWhiteSpace(baseDir))
+
+
+
+        return NormalizeDirectory(relativePath);
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        return NormalizeDirectory(Path.Combine(baseDir, relativePath));
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        return NormalizeDirectory(relativePath);
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ConvertDiffPathToPlatform(string path)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(path))
+
+
+
+        return string.Empty;
+
+
+
+      var normalized = NormalizeDiffPath(path);
+
+
+
+      return normalized.Replace('/', Path.DirectorySeparatorChar);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static bool IsFileReadOnly(string path)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var info = new FileInfo(path);
+
+
+
+        return info.Exists && info.IsReadOnly;
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        return false;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static async Task LogPatchReadOnlyAsync(string path)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[warn] Skipping patch for {path}: file is read-only or locked.");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // diagnostics best effort
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnExecCancelClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Button button)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var execId = button.Tag as string;
+
+
+
+      if (string.IsNullOrEmpty(execId))
+
+
+
+        return;
+
+
+
+
+
+
+
+      button.IsEnabled = false;
+
+
+
+      if (_execTurns.TryGetValue(execId, out var turn))
+
+
+
+        turn.CancelRequested = true;
+
+
+
+
+
+
+
+      if (this.FindName("StatusText") is TextBlock status)
+
+
+
+        status.Text = "Cancelling exec...";
+
+
+
+
+
+
+
+      var ok = await SendExecCancelAsync(execId);
+
+
+
+      if (!ok)
+
+
+
+      {
+
+
+
+        if (_execTurns.TryGetValue(execId, out var retryTurn))
+
+
+
+          retryTurn.CancelRequested = false;
+
+
+
+        button.IsEnabled = true;
+
+
+
+        if (this.FindName("StatusText") is TextBlock statusRetry)
+
+
+
+          statusRetry.Text = "Exec cancel failed";
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        _telemetry.CancelExec(execId);
+
+
+
+        UpdateTelemetryUi();
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnExecCopyAllClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+        var text = ChatTextUtilities.StripAnsi(turn.Buffer.ToString()).TrimEnd('\n');
+
+
+
+        if (string.IsNullOrWhiteSpace(text))
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
+
+
+
+          return;
+
+
+
+        }
+
+
+
+
+
+
+
+        Clipboard.SetText(text);
+
+
+
+        await VS.StatusBar.ShowMessageAsync("Exec output copied to clipboard.");
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          var pane = await DiagnosticsPane.GetAsync();
+
+
+
+          await pane.WriteLineAsync($"[error] Exec copy failed: {ex.Message}");
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          // diagnostics best effort
+
+
+
+        }
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnExecClearClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+
+
+
+        return;
+
+
+
+
+
+
+
+      turn.Buffer.Clear();
+
+
+
+      RenderAnsiText(turn.Body, string.Empty, turn.DefaultForeground ?? turn.Body.Foreground);
+
+
+
+
+
+
+
+      if (this.FindName("StatusText") is TextBlock status)
+
+
+
+        status.Text = "Exec output cleared.";
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await VS.StatusBar.ShowMessageAsync("Exec output cleared.");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // status bar optional
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnExecConsoleToggleChanged(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (_suppressExecToggleEvent)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (FindName("ExecConsoleToggle") is not ToggleButton toggle)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var visible = toggle.IsChecked == true;
+
+
+
+      if (_options != null)
+
+
+
+        _options.ExecConsoleVisible = visible;
+
+
+
+
+
+
+
+      foreach (var turn in _execConsoleTurns)
+
+
+
+        ApplyExecConsoleVisibility(turn);
+
+
+
+      UpdateMcpToolsUi();
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnRefreshMcpToolsClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      var now = DateTime.UtcNow;
+
+
+
+      var timeSinceLastRefresh = now - _lastMcpToolsRefresh;
+
+
+
+      
+
+
+
+      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
+
+
+
+      {
+
+
+
+        // Show debounce message
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
+
+
+
+        });
+
+
+
+        return;
+
+
+
+      }
+
+
+
+      
+
+
+
+      _lastMcpToolsRefresh = now;
+
+
+
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("user-refresh"));
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnMcpHelpClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Open MCP documentation in browser
+
+
+
+        var url = "https://codex.anthropic.com/docs/mcp";
+
+
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+
+
+
+        {
+
+
+
+          FileName = url,
+
+
+
+          UseShellExecute = true
+
+
+
+        });
+
+
+
+        
+
+
+
+        // Log telemetry for help link click
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await LogTelemetryAsync("mcp_help_clicked", new Dictionary<string, object>
+
+
+
+          {
+
+
+
+            ["url"] = url
+
+
+
+          });
+
+
+
+        });
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Failed to open MCP documentation: {ex.Message}");
+
+
+
+        });
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnRefreshPromptsClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      var now = DateTime.UtcNow;
+
+
+
+      var timeSinceLastRefresh = now - _lastPromptsRefresh;
+
+
+
+      
+
+
+
+      if (timeSinceLastRefresh.TotalSeconds < RefreshDebounceSeconds)
+
+
+
+      {
+
+
+
+        // Show debounce message
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Please wait {RefreshDebounceSeconds - (int)timeSinceLastRefresh.TotalSeconds} seconds before refreshing again");
+
+
+
+        });
+
+
+
+        return;
+
+
+
+      }
+
+
+
+      
+
+
+
+      _lastPromptsRefresh = now;
+
+
+
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("user-refresh"));
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnCustomPromptClick(object sender, MouseButtonEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Insert the prompt body into the input box
+
+
+
+        if (FindName("InputBox") is TextBox inputBox)
+
+
+
+        {
+
+
+
+          var currentText = inputBox.Text ?? string.Empty;
+
+
+
+          var promptText = prompt.Body ?? string.Empty;
+
+
+
+          
+
+
+
+          if (string.IsNullOrWhiteSpace(currentText))
+
+
+
+          {
+
+
+
+            inputBox.Text = promptText;
+
+
+
+          }
+
+
+
+          else
+
+
+
+          {
+
+
+
+            // Insert at cursor position or append
+
+
+
+            var cursorPosition = inputBox.CaretIndex;
+
+
+
+            inputBox.Text = currentText.Insert(cursorPosition, promptText);
+
+
+
+            inputBox.CaretIndex = cursorPosition + promptText.Length;
+
+
+
+          }
+
+
+
+          
+
+
+
+          inputBox.Focus();
+
+
+
+          
+
+
+
+              // Track last used prompt
+
+
+
+              _options.LastUsedPrompt = prompt.Id;
+
+
+
+              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+
+
+
+              {
+
+
+
+
+
+
+              });
+
+
+
+
+
+
+
+              // Record telemetry for prompt insertion
+
+
+
+              _telemetry.RecordPromptInsert();
+
+
+
+
+
+
+
+              // Log telemetry for prompt insertion
+
+
+
+              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+
+
+
+              {
+
+
+
+                await LogTelemetryAsync("prompt_inserted", new Dictionary<string, object>
+
+
+
+                {
+
+
+
+                  ["prompt_id"] = prompt.Id,
+
+
+
+                  ["prompt_name"] = prompt.Name,
+
+
+
+                  ["prompt_source"] = prompt.Source
+
+
+
+                });
+
+
+
+              });
+
+
+
+        }
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Failed to insert prompt: {ex.Message}");
+
+
+
+        });
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnMcpToolClick(object sender, MouseButtonEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Track last used tool
+
+
+
+        _options.LastUsedTool = tool.Name;
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+
+
+
+        {
+
+
+
+
+
+
+        });
+
+
+
+
+
+
+
+        // Record telemetry for tool invocation
+
+
+
+        _telemetry.RecordToolInvocation();
+
+
+
+
+
+
+
+        // Log telemetry for tool selection
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+
+
+
+        {
+
+
+
+          await LogTelemetryAsync("tool_selected", new Dictionary<string, object>
+
+
+
+          {
+
+
+
+            ["tool_name"] = tool.Name,
+
+
+
+            ["tool_server"] = tool.Server
+
+
+
+          });
+
+
+
+        });
+
+
+
+        
+
+
+
+        // Show a message about the tool
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Selected tool: {tool.Name}");
+
+
+
+        });
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Failed to select tool: {ex.Message}");
+
+
+
+        });
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnMcpToolMouseEnter(object sender, MouseEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border || border.DataContext is not McpToolInfo tool)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Show tool details on hover
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync($"Tool: {tool.Name} - {tool.Description}");
+
+
+
+        });
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // Ignore errors in hover
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnMcpToolMouseLeave(object sender, MouseEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Clear status bar message
+
+
+
+        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync("");
+
+
+
+        });
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // Ignore errors in hover
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnCustomPromptMouseEnter(object sender, MouseEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border || border.DataContext is not CustomPromptInfo prompt)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Show preview of the prompt body
+
+
+
+        if (border.FindName("PromptPreview") is TextBlock preview)
+
+
+
+        {
+
+
+
+          preview.Visibility = Visibility.Visible;
+
+
+
+        }
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // Ignore errors in hover preview
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnCustomPromptMouseLeave(object sender, MouseEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Border border)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        // Hide preview of the prompt body
+
+
+
+        if (border.FindName("PromptPreview") is TextBlock preview)
+
+
+
+        {
+
+
+
+          preview.Visibility = Visibility.Collapsed;
+
+
+
+        }
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // Ignore errors in hover preview
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnExecExportClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not Button button || button.Tag is not ExecTurn turn)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+        var buffer = ChatTextUtilities.StripAnsi(turn.Buffer.ToString());
+
+
+
+        if (string.IsNullOrWhiteSpace(buffer))
+
+
+
+        {
+
+
+
+          await VS.StatusBar.ShowMessageAsync("Exec output is empty.");
+
+
+
+          return;
+
+
+
+        }
+
+
+
+
+
+
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+
+
+
+        {
+
+
+
+          Title = "Export Exec Output",
+
+
+
+          Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+
+
+
+          FileName = BuildExecExportFileName(turn)
+
+
+
+        };
+
+
+
+
+
+
+
+        var result = dialog.ShowDialog();
+
+
+
+        if (result != true || string.IsNullOrWhiteSpace(dialog.FileName))
+
+
+
+          return;
+
+
+
+
+
+
+
+        File.WriteAllText(dialog.FileName, buffer);
+
+
+
+        await VS.StatusBar.ShowMessageAsync($"Exec output saved to {Path.GetFileName(dialog.FileName)}.");
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        try
+
+
+
+        {
+
+
+
+          var pane = await DiagnosticsPane.GetAsync();
+
+
+
+          await pane.WriteLineAsync($"[error] Exec export failed: {ex.Message}");
+
+
+
+        }
+
+
+
+        catch
+
+
+
+        {
+
+
+
+          // diagnostics best effort
+
+
+
+        }
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnDiffTreeCheckBoxClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      if (sender is not CheckBox checkBox || checkBox.DataContext is not DiffTreeItem item)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var next = item.IsChecked != true;
+
+
+
+      _suppressDiffSelectionUpdate = true;
+
+
+
+      try
+
+
+
+      {
+
+
+
+        item.SetIsChecked(next, updateChildren: true, updateParent: true);
+
+
+
+      }
+
+
+
+      finally
+
+
+
+      {
+
+
+
+        _suppressDiffSelectionUpdate = false;
+
+
+
+      }
+
+
+
+
+
+
+
+      HandleDiffSelectionChanged(item);
+
+
+
+      e.Handled = true;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractDocumentText(JObject container, string[] keys)
+
+
+
+    {
+
+
+
+      if (container == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      foreach (var key in keys)
+
+
+
+      {
+
+
+
+        if (container.TryGetValue(key, out var token))
+
+
+
+        {
+
+
+
+          var text = CollectTokenText(token);
+
+
+
+          if (!string.IsNullOrEmpty(text))
+
+
+
+            return text;
+
+
+
+        }
+
+
+
+
+
+
+
+        if (container[key] is JObject nested)
+
+
+
+        {
+
+
+
+          var text = TryGetString(nested, "text") ?? TryGetString(nested, "value");
+
+
+
+          if (!string.IsNullOrEmpty(text))
+
+
+
+            return text;
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      return string.Empty;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractNestedText(JObject parent, params string[] keys)
+
+
+
+    {
+
+
+
+      if (parent == null || keys == null || keys.Length == 0)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      JToken current = parent;
+
+
+
+      foreach (var key in keys)
+
+
+
+      {
+
+
+
+        if (current is not JObject obj || !obj.TryGetValue(key, out current))
+
+
+
+          return string.Empty;
+
+
+
+      }
+
+
+
+
+
+
+
+      return CollectTokenText(current);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CollectTokenText(JToken token)
+
+
+
+    {
+
+
+
+      if (token == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      return token.Type switch
+
+
+
+      {
+
+
+
+        JTokenType.String => token.ToString(),
+
+
+
+        JTokenType.Object => TryGetString((JObject)token, "text") ?? TryGetString((JObject)token, "value") ?? string.Empty,
+
+
+
+        JTokenType.Array => string.Concat(token.Children().Select(CollectTokenText)),
+
+
+
+        _ => token.ToString()
+
+
+
+      };
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task ShowDiffAsync(DiffDocument doc)
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      IVsDifferenceService diffService;
+
+
+
+      try
+
+
+
+      {
+
+
+
+        diffService = await VS.GetRequiredServiceAsync<SVsDifferenceService, IVsDifferenceService>();
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] Unable to acquire diff service: {ex.Message}");
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      var originalFile = CreateTempDiffFile(doc.Path, doc.Original, "original");
+
+
+
+      var modifiedFile = CreateTempDiffFile(doc.Path, doc.Modified, "modified");
+
+
+
+
+
+
+
+      var caption = $"Codex Diff - {doc.Path}";
+
+
+
+      var tooltip = caption;
+
+
+
+      var originalLabel = $"{doc.Path} (current)";
+
+
+
+      var modifiedLabel = $"{doc.Path} (Codex)";
+
+
+
+
+
+
+
+      const __VSDIFFSERVICEOPTIONS options =
+
+
+
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_LeftFileIsTemporary |
+
+
+
+        __VSDIFFSERVICEOPTIONS.VSDIFFOPT_RightFileIsTemporary;
+
+
+
+      try
+
+
+
+      {
+
+
+
+        diffService.OpenComparisonWindow2(
+
+
+
+          originalFile,
+
+
+
+          modifiedFile,
+
+
+
+          caption,
+
+
+
+          tooltip,
+
+
+
+          originalLabel,
+
+
+
+          modifiedLabel,
+
+
+
+          string.Empty,
+
+
+
+          string.Empty,
+
+
+
+          (uint)options);
+
+
+
+
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[diff] Opened diff for {doc.Path}");
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] Failed to open diff viewer for {doc.Path}: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CreateTempDiffFile(string displayPath, string contents, string suffix)
+
+
+
+    {
+
+
+
+      var safeName = Path.GetFileName(displayPath);
+
+
+
+      if (string.IsNullOrEmpty(safeName))
+
+
+
+        safeName = "codex";
+
+
+
+
+
+
+
+      foreach (var invalid in Path.GetInvalidFileNameChars())
+
+
+
+        safeName = safeName.Replace(invalid, '_');
+
+
+
+
+
+
+
+      var dir = Path.Combine(Path.GetTempPath(), "CodexVS22", "Diffs");
+
+
+
+      Directory.CreateDirectory(dir);
+
+
+
+
+
+
+
+      var filePath = Path.Combine(dir, $"{safeName}.{suffix}.{Guid.NewGuid():N}.tmp");
+
+
+
+      File.WriteAllText(filePath, contents ?? string.Empty, Encoding.UTF8);
+
+
+
+      return filePath;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task UpdateFullAccessBannerAsync()
+
+
+
+    {
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+
+
+
+
+      var banner = this.FindName("FullAccessBanner") as Border;
+
+
+
+      var text = this.FindName("FullAccessText") as TextBlock;
+
+
+
+      if (banner == null || text == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var mode = _options?.Mode ?? CodexOptions.ApprovalMode.Chat;
+
+
+
+      var show = mode == CodexOptions.ApprovalMode.AgentFullAccess;
+
+
+
+      banner.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+
+
+      if (show)
+
+
+
+      {
+
+
+
+        text.Text = "Full Access mode is enabled. Codex may auto-approve exec commands and patches.";
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void EnqueueFullAccessBannerRefresh()
+
+
+
+    {
+
+
+
+      ThreadHelper.JoinableTaskFactory.RunAsync(UpdateFullAccessBannerAsync);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string NormalizeCwd(string cwd)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(cwd))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var normalized = cwd.Trim();
+
+
+
+      if (normalized.EndsWith("/.", StringComparison.Ordinal) || normalized.EndsWith("\\.", StringComparison.Ordinal))
+
+
+
+      {
+
+
+
+        normalized = normalized.Length > 2
+
+
+
+          ? normalized.Substring(0, normalized.Length - 2)
+
+
+
+          : normalized.Substring(0, normalized.Length - 1);
+
+
+
+      }
+
+
+
+
+
+
+
+      return normalized;
+
+
+
+    }
+
+
+
+
+
+
+
+    internal readonly struct EnvironmentSnapshot
+
+
+
+    {
+
+
+
+      public static readonly EnvironmentSnapshot Empty = new(string.Empty, string.Empty);
+
+
+
+
+
+
+
+      public EnvironmentSnapshot(string solutionRoot, string workspaceRoot)
+
+
+
+      {
+
+
+
+        SolutionRoot = string.IsNullOrWhiteSpace(solutionRoot) ? string.Empty : solutionRoot;
+
+
+
+        WorkspaceRoot = string.IsNullOrWhiteSpace(workspaceRoot) ? string.Empty : workspaceRoot;
+
+
+
+      }
+
+
+
+
+
+
+
+      public string SolutionRoot { get; }
+
+
+
+      public string WorkspaceRoot { get; }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void RemoveExecIdMappings(string canonicalId)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrEmpty(canonicalId))
+
+
+
+        return;
+
+
+
+
+
+
+
+      var keysToRemove = _execIdRemap
+
+
+
+        .Where(kvp => string.Equals(kvp.Value, canonicalId, StringComparison.Ordinal))
+
+
+
+        .Select(kvp => kvp.Key)
+
+
+
+        .ToList();
+
+
+
+
+
+
+
+      foreach (var key in keysToRemove)
+
+
+
+        _execIdRemap.Remove(key);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static readonly Regex AnsiCodeRegex = new("\x1B\\[(?<code>[0-9;]*)m", RegexOptions.Compiled);
+
+
+
+
+
+
+
+    private static readonly Brush[] AnsiBrushes =
+
+
+
+    {
+
+
+
+      Brushes.DimGray,      // black
+
+
+
+      Brushes.IndianRed,    // red
+
+
+
+      Brushes.SeaGreen,     // green
+
+
+
+      Brushes.Goldenrod,    // yellow
+
+
+
+      Brushes.SteelBlue,    // blue
+
+
+
+      Brushes.Orchid,       // magenta
+
+
+
+      Brushes.Teal,         // cyan
+
+
+
+      Brushes.Gainsboro     // white
+
+
+
+    };
+
+
+
+
+
+
+
+    private static readonly Brush[] AnsiBrightBrushes =
+
+
+
+    {
+
+
+
+      Brushes.LightGray,
+
+
+
+      Brushes.Red,
+
+
+
+      Brushes.LimeGreen,
+
+
+
+      Brushes.Yellow,
+
+
+
+      Brushes.DeepSkyBlue,
+
+
+
+      Brushes.MediumOrchid,
+
+
+
+      Brushes.Aqua,
+
+
+
+      Brushes.White
+
+
+
+    };
+
+
+
+
+
+
+
+    private void OnExecContainerPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+
+
+
+    {
+
+
+
+      if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (sender is not Border border || border.Tag is not ExecTurn turn)
+
+
+
+        return;
+
+
+
+
+
+
+
+      e.Handled = true;
+
+
+
+
+
+
+
+      var delta = e.Delta > 0 ? 20 : -20;
+
+
+
+      var newHeight = Math.Max(80, Math.Min(600, border.MaxHeight + delta));
+
+
+
+      border.MaxHeight = newHeight;
+
+
+
+      _execConsolePreferredHeight = newHeight;
+
+
+
+
+
+
+
+      if (_options != null)
+
+
+
+        _options.ExecConsoleHeight = newHeight;
+
+
+
+
+
+
+
+      ApplyExecConsoleVisibility(turn);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ApplyExecConsoleVisibility(ExecTurn turn)
+
+
+
+    {
+
+
+
+      if (turn?.Container == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var show = ShouldShowExecTurn(turn?.IsRunning ?? false);
+
+
+
+      turn.Container.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+
+
+
+
+
+
+      if (show)
+
+
+
+        turn.Container.MaxHeight = _execConsolePreferredHeight;
+
+
+
+    }
+
+
+
+
+
+
+
+    private bool ShouldShowExecTurn(bool running)
+
+
+
+    {
+
+
+
+      if (running)
+
+
+
+        return true;
+
+
+
+
+
+
+
+      if (_options?.AutoHideExecConsole ?? false)
+
+
+
+        return false;
+
+
+
+
+
+
+
+      return _options?.ExecConsoleVisible ?? true;
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task RequestMcpToolsAsync(string reason)
+
+
+
+    {
+
+
+
+      var host = _host;
+
+
+
+      if (host == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var submission = new JObject
+
+
+
+        {
+
+
+
+          ["id"] = Guid.NewGuid().ToString(),
+
+
+
+          ["op"] = new JObject
+
+
+
+          {
+
+
+
+            ["type"] = "list_mcp_tools"
+
+
+
+          }
+
+
+
+        };
+
+
+
+
+
+
+
+        var json = submission.ToString(Formatting.None);
+
+
+
+        var ok = await host.SendAsync(json);
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        if (ok)
+
+
+
+          await pane.WriteLineAsync($"[info] Requested MCP tools ({reason}).");
+
+
+
+        else
+
+
+
+          await pane.WriteLineAsync($"[warn] Failed to request MCP tools ({reason}).");
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] RequestMcpToolsAsync failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task RequestCustomPromptsAsync(string reason)
+
+
+
+    {
+
+
+
+      var host = _host;
+
+
+
+      if (host == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var submission = new JObject
+
+
+
+        {
+
+
+
+          ["id"] = Guid.NewGuid().ToString(),
+
+
+
+          ["op"] = new JObject
+
+
+
+          {
+
+
+
+            ["type"] = "list_custom_prompts"
+
+
+
+          }
+
+
+
+        };
+
+
+
+
+
+
+
+        var json = submission.ToString(Formatting.None);
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[info] Requesting custom prompts ({reason}).");
+
+
+
+        await host.SendAsync(json);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] RequestCustomPromptsAsync failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ApplyExecBufferLimit(ExecTurn turn)
+
+
+
+    {
+
+
+
+      if (turn?.Buffer == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var limit = _options?.ExecOutputBufferLimit ?? 0;
+
+
+
+      if (limit <= 0)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (turn.Buffer.Length <= limit)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var excess = turn.Buffer.Length - limit;
+
+
+
+      if (excess < limit / 5)
+
+
+
+        excess = limit / 5;
+
+
+
+
+
+
+
+      turn.Buffer.Remove(0, excess);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string BuildExecExportFileName(ExecTurn turn)
+
+
+
+    {
+
+
+
+      var source = !string.IsNullOrWhiteSpace(turn?.NormalizedCommand)
+
+
+
+        ? turn.NormalizedCommand
+
+
+
+        : turn?.ExecId;
+
+
+
+
+
+
+
+      var safe = SanitizeFileName(source);
+
+
+
+      if (string.IsNullOrEmpty(safe))
+
+
+
+        safe = "codex-exec";
+
+
+
+
+
+
+
+      var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+
+
+
+      return $"{safe}-{timestamp}.txt";
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string SanitizeFileName(string name)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(name))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var invalid = Path.GetInvalidFileNameChars();
+
+
+
+      var builder = new StringBuilder(name.Length);
+
+
+
+      foreach (var ch in name)
+
+
+
+      {
+
+
+
+        if (invalid.Contains(ch) || char.IsControl(ch))
+
+
+
+        {
+
+
+
+          builder.Append('-');
+
+
+
+          continue;
+
+
+
+        }
+
+
+
+
+
+
+
+        builder.Append(ch);
+
+
+
+      }
+
+
+
+
+
+
+
+      var sanitized = builder.ToString().Trim('-');
+
+
+
+      if (sanitized.Length > 80)
+
+
+
+        sanitized = sanitized.Substring(0, 80);
+
+
+
+
+
+
+
+      return sanitized;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateMcpToolsUi()
+
+
+
+    {
+
+
+
+      if (FindName("McpToolsContainer") is not Border container ||
+
+
+
+          FindName("McpToolsEmptyText") is not StackPanel emptyPanel ||
+
+
+
+          FindName("McpToolsList") is not ItemsControl list)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (list.ItemsSource != _mcpTools)
+
+
+
+        list.ItemsSource = _mcpTools;
+
+
+
+
+
+
+
+      if (_mcpTools.Count == 0)
+
+
+
+      {
+
+
+
+        emptyPanel.Visibility = Visibility.Visible;
+
+
+
+        container.Visibility = Visibility.Visible;
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        emptyPanel.Visibility = Visibility.Collapsed;
+
+
+
+        container.Visibility = Visibility.Visible;
+
+
+
+      }
+
+
+
+
+
+
+
+      UpdateMcpToolRunsUi();
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateMcpToolRunsUi()
+
+
+
+    {
+
+
+
+      if (FindName("McpToolRunsContainer") is not Border container ||
+
+
+
+          FindName("McpToolRunsList") is not ItemsControl list)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (list.ItemsSource != _mcpToolRuns)
+
+
+
+        list.ItemsSource = _mcpToolRuns;
+
+
+
+
+
+
+
+      container.Visibility = _mcpToolRuns.Count > 0
+
+
+
+        ? Visibility.Visible
+
+
+
+        : Visibility.Collapsed;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateCustomPromptsUi()
+
+
+
+    {
+
+
+
+      if (FindName("CustomPromptsContainer") is not Border container ||
+
+
+
+          FindName("CustomPromptsList") is not ItemsControl list ||
+
+
+
+          FindName("CustomPromptsEmptyText") is not TextBlock empty)
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (list.ItemsSource != _customPrompts)
+
+
+
+        list.ItemsSource = _customPrompts;
+
+
+
+
+
+
+
+      if (_customPrompts.Count == 0)
+
+
+
+      {
+
+
+
+        empty.Visibility = Visibility.Visible;
+
+
+
+        container.Visibility = Visibility.Visible;
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        empty.Visibility = Visibility.Collapsed;
+
+
+
+        container.Visibility = Visibility.Visible;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void AppendExecText(ExecTurn turn, string text)
+
+
+
+    {
+
+
+
+      if (turn == null || string.IsNullOrEmpty(text))
+
+
+
+        return;
+
+
+
+
+
+
+
+      turn.Buffer.Append(text);
+
+
+
+      if (!text.EndsWith("\n", StringComparison.Ordinal))
+
+
+
+        turn.Buffer.Append('\n');
+
+
+
+
+
+
+
+      ApplyExecBufferLimit(turn);
+
+
+
+
+
+
+
+      var bufferText = turn.Buffer.ToString();
+
+
+
+      RenderAnsiText(turn.Body, bufferText, turn.DefaultForeground ?? turn.Body.Foreground);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void RenderAnsiText(TextBlock block, string text, Brush defaultBrush)
+
+
+
+    {
+
+
+
+      if (block == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      block.Inlines.Clear();
+
+
+
+
+
+
+
+      if (string.IsNullOrEmpty(text))
+
+
+
+        return;
+
+
+
+
+
+
+
+      var currentBrush = defaultBrush;
+
+
+
+      var isBold = false;
+
+
+
+      var lastIndex = 0;
+
+
+
+
+
+
+
+      foreach (Match match in AnsiCodeRegex.Matches(text))
+
+
+
+      {
+
+
+
+        if (match.Index > lastIndex)
+
+
+
+        {
+
+
+
+          var segment = text.Substring(lastIndex, match.Index - lastIndex);
+
+
+
+          AppendAnsiSegment(block, segment, currentBrush, isBold);
+
+
+
+        }
+
+
+
+
+
+
+
+        var codes = match.Groups["code"].Value;
+
+
+
+        UpdateAnsiState(codes, defaultBrush, ref currentBrush, ref isBold);
+
+
+
+        lastIndex = match.Index + match.Length;
+
+
+
+      }
+
+
+
+
+
+
+
+      if (lastIndex < text.Length)
+
+
+
+      {
+
+
+
+        var tail = text.Substring(lastIndex);
+
+
+
+        AppendAnsiSegment(block, tail, currentBrush, isBold);
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void AppendAnsiSegment(TextBlock block, string segment, Brush brush, bool bold)
+
+
+
+    {
+
+
+
+      if (block == null || string.IsNullOrEmpty(segment))
+
+
+
+        return;
+
+
+
+
+
+
+
+      var sanitized = segment.Replace("\r", string.Empty);
+
+
+
+      if (sanitized.Length == 0)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var run = new Run(sanitized)
+
+
+
+      {
+
+
+
+        Foreground = brush,
+
+
+
+        FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal
+
+
+
+      };
+
+
+
+      block.Inlines.Add(run);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static void UpdateAnsiState(string codes, Brush defaultBrush, ref Brush brush, ref bool bold)
+
+
+
+    {
+
+
+
+      if (defaultBrush == null)
+
+
+
+        defaultBrush = Brushes.Gainsboro;
+
+
+
+
+
+
+
+      if (string.IsNullOrEmpty(codes))
+
+
+
+      {
+
+
+
+        brush = defaultBrush;
+
+
+
+        bold = false;
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      var parts = codes.Split(';');
+
+
+
+      foreach (var part in parts)
+
+
+
+      {
+
+
+
+        if (string.IsNullOrWhiteSpace(part))
+
+
+
+        {
+
+
+
+          brush = defaultBrush;
+
+
+
+          bold = false;
+
+
+
+          continue;
+
+
+
+        }
+
+
+
+
+
+
+
+        if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
+
+
+
+          continue;
+
+
+
+
+
+
+
+        switch (code)
+
+
+
+        {
+
+
+
+          case 0:
+
+
+
+            brush = defaultBrush;
+
+
+
+            bold = false;
+
+
+
+            break;
+
+
+
+          case 1:
+
+
+
+            bold = true;
+
+
+
+            break;
+
+
+
+          case 22:
+
+
+
+            bold = false;
+
+
+
+            break;
+
+
+
+          case 39:
+
+
+
+            brush = defaultBrush;
+
+
+
+            break;
+
+
+
+          default:
+
+
+
+            if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97))
+
+
+
+            {
+
+
+
+              var resolved = ResolveAnsiBrush(code);
+
+
+
+              if (resolved != null)
+
+
+
+                brush = resolved;
+
+
+
+            }
+
+
+
+            break;
+
+
+
+        }
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static Brush ResolveAnsiBrush(int code)
+
+
+
+    {
+
+
+
+      var bright = false;
+
+
+
+      if (code >= 90 && code <= 97)
+
+
+
+      {
+
+
+
+        bright = true;
+
+
+
+        code -= 60;
+
+
+
+      }
+
+
+
+
+
+
+
+      var index = code - 30;
+
+
+
+      if (index < 0 || index >= AnsiBrushes.Length)
+
+
+
+        return null;
+
+
+
+
+
+
+
+      return bright ? AnsiBrightBrushes[index] : AnsiBrushes[index];
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateExecCancelState(ExecTurn turn, bool running)
+
+
+
+    {
+
+
+
+      if (turn == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      turn.IsRunning = running;
+
+
+
+      turn.CancelRequested = false;
+
+
+
+
+
+
+
+      if (turn.CancelButton != null)
+
+
+
+      {
+
+
+
+        turn.CancelButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+
+
+
+        turn.CancelButton.IsEnabled = true;
+
+
+
+      }
+
+
+
+
+
+
+
+      ApplyExecConsoleVisibility(turn);
+
+
+
+
+
+
+
+      if (running)
+
+
+
+        ScrollTranscriptToEnd();
+
+
+
+    }
+
+
+
+
+
+
+
+    private AssistantTurn GetOrCreateAssistantTurn(string id)
+
+
+
+    {
+
+
+
+      if (_assistantTurns.TryGetValue(id, out var turn))
+
+
+
+        return turn;
+
+
+
+
+
+
+
+      var elements = CreateAssistantBubble();
+
+
+
+      turn = new AssistantTurn(elements);
+
+
+
+      _assistantTurns[id] = turn;
+
+
+
+      return turn;
+
+
+
+    }
+
+
+
+
+
+
+
+    private ChatBubbleElements CreateAssistantBubble()
+
+
+
+      => CreateChatBubble("assistant", string.Empty, DateTime.UtcNow);
+
+
+
+
+
+
+
+    private void AppendAssistantText(AssistantTurn turn, string delta, bool isFinal = false, bool decorate = true)
+
+
+
+    {
+
+
+
+      if (turn == null || string.IsNullOrEmpty(delta))
+
+
+
+        return;
+
+
+
+
+
+
+
+      if (turn.Buffer.Length > 0 && !turn.Buffer.ToString().EndsWith("\n", StringComparison.Ordinal))
+
+
+
+        turn.Buffer.AppendLine();
+
+
+
+
+
+
+
+      turn.Buffer.Append(delta);
+
+
+
+      var cleaned = ChatTextUtilities.NormalizeAssistantText(turn.Buffer.ToString());
+
+
+
+      turn.Bubble.Text = cleaned;
+
+
+
+      UpdateBubbleAutomation(turn.Header, turn.Bubble, cleaned);
+
+
+
+      ScrollTranscriptToEnd();
+
+
+
+
+
+
+
+      if (!decorate)
+
+
+
+        return;
+
+
+
+
+
+
+
+      _assistantChunkCounter++;
+
+
+
+      if (!isFinal && _assistantChunkCounter % 5 == 0)
+
+
+
+      {
+
+
+
+        turn.Bubble.Text += "\n";
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void AttachCopyContextMenu(TextBlock bubble)
+
+
+
+    {
+
+
+
+      if (bubble == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var menu = new ContextMenu();
+
+
+
+      var item = new MenuItem
+
+
+
+      {
+
+
+
+        Header = "Copy Message",
+
+
+
+        Tag = bubble
+
+
+
+      };
+
+
+
+      item.Click += OnCopyMessageMenuItemClick;
+
+
+
+      menu.Items.Add(item);
+
+
+
+      bubble.ContextMenu = menu;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateStreamingIndicator(bool streaming)
+
+
+
+    {
+
+
+
+      if (this.FindName("StreamingIndicator") is not ProgressBar indicator)
+
+
+
+        return;
+
+
+
+      indicator.Visibility = streaming ? Visibility.Visible : Visibility.Collapsed;
+
+
+
+      if (!streaming)
+
+
+
+        indicator.BeginAnimation(ProgressBar.OpacityProperty, null);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void FocusInputBox()
+
+
+
+    {
+
+
+
+      Dispatcher.BeginInvoke(new Action(() =>
+
+
+
+      {
+
+
+
+        if (this.FindName("InputBox") is TextBox input)
+
+
+
+        {
+
+
+
+          if (!input.IsKeyboardFocusWithin)
+
+
+
+            input.Focus();
+
+
+
+        }
+
+
+
+      }), DispatcherPriority.Input);
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnCopyMessageMenuItemClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+        if (sender is MenuItem item && item.Tag is TextBlock bubble)
+
+
+
+        {
+
+
+
+          var text = bubble.Text ?? string.Empty;
+
+
+
+          if (bubble.Tag is ExecTurn execTurn)
+
+
+
+          {
+
+
+
+            var buffer = execTurn.Buffer.ToString();
+
+
+
+            text = ChatTextUtilities.StripAnsi(buffer).TrimEnd('\n');
+
+
+
+          }
+
+
+
+          if (string.IsNullOrWhiteSpace(text))
+
+
+
+            return;
+
+
+
+          Clipboard.SetText(text);
+
+
+
+          await VS.StatusBar.ShowMessageAsync("Message copied to clipboard.");
+
+
+
+          AnimateBubbleFeedback(bubble);
+
+
+
+        }
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] Copy message failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private ChatBubbleElements CreateChatBubble(string role, string initialText = "", DateTime? timestamp = null)
+
+
+
+    {
+
+
+
+      if (this.FindName("Transcript") is not StackPanel transcript)
+
+
+
+        throw new InvalidOperationException("Transcript panel missing");
+
+
+
+
+
+
+
+      var margin = role switch
+
+
+
+      {
+
+
+
+        "assistant" => new Thickness(60, 4, 0, 4),
+
+
+
+        _ => new Thickness(0, 4, 60, 4)
+
+
+
+      };
+
+
+
+      var alignment = role switch
+
+
+
+      {
+
+
+
+        "assistant" => HorizontalAlignment.Right,
+
+
+
+        _ => HorizontalAlignment.Left
+
+
+
+      };
+
+
+
+
+
+
+
+      var when = (timestamp ?? DateTime.UtcNow).ToLocalTime();
+
+
+
+      var headerText = $"{GetRoleDisplayName(role)} — {when.ToString("t", CultureInfo.CurrentCulture)}";
+
+
+
+
+
+
+
+      var container = new Border
+
+
+
+      {
+
+
+
+        CornerRadius = new CornerRadius(8),
+
+
+
+        Padding = new Thickness(10),
+
+
+
+        Margin = margin,
+
+
+
+        BorderThickness = new Thickness(1),
+
+
+
+        MaxWidth = 520,
+
+
+
+        HorizontalAlignment = alignment
+
+
+
+      };
+
+
+
+      container.SetResourceReference(Border.BorderBrushProperty, VsBrushes.ToolWindowBorderKey);
+
+
+
+      ApplyChatBubbleBrush(container, role);
+
+
+
+
+
+
+
+      var header = new TextBlock
+
+
+
+      {
+
+
+
+        Text = headerText,
+
+
+
+        FontWeight = FontWeights.SemiBold,
+
+
+
+        Margin = new Thickness(0, 0, 0, 4)
+
+
+
+      };
+
+
+
+      header.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+
+
+
+
+
+
+      var bubble = new TextBlock
+
+
+
+      {
+
+
+
+        Text = initialText,
+
+
+
+        Tag = role,
+
+
+
+        TextWrapping = TextWrapping.Wrap,
+
+
+
+        TextAlignment = TextAlignment.Left,
+
+
+
+        Visibility = Visibility.Visible
+
+
+
+      };
+
+
+
+      bubble.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+
+
+      AttachCopyContextMenu(bubble);
+
+
+
+
+
+
+
+      var layout = new StackPanel
+
+
+
+      {
+
+
+
+        Orientation = Orientation.Vertical
+
+
+
+      };
+
+
+
+      layout.Children.Add(header);
+
+
+
+      layout.Children.Add(bubble);
+
+
+
+
+
+
+
+      container.Child = layout;
+
+
+
+      transcript.Children.Add(container);
+
+
+
+      UpdateBubbleAutomation(header, bubble, initialText);
+
+
+
+      ScrollTranscriptToEnd();
+
+
+
+
+
+
+
+      return new ChatBubbleElements(container, header, bubble);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string GetRoleDisplayName(string role)
+
+
+
+      => string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase) ? "Codex" : "You";
+
+
+
+
+
+
+
+    private void UpdateBubbleAutomation(TextBlock header, TextBlock bubble, string bodyText)
+
+
+
+    {
+
+
+
+      if (header == null || bubble == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var sanitized = string.IsNullOrWhiteSpace(bodyText)
+
+
+
+        ? string.Empty
+
+
+
+        : bodyText.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+
+
+
+
+
+
+      var name = string.IsNullOrWhiteSpace(sanitized)
+
+
+
+        ? header.Text ?? string.Empty
+
+
+
+        : $"{header.Text}: {sanitized}";
+
+
+
+
+
+
+
+      AutomationProperties.SetName(bubble, name);
+
+
+
+      AutomationProperties.SetName(header, header.Text ?? string.Empty);
+
+
+
+
+
+
+
+      if (header.Parent is FrameworkElement element)
+
+
+
+        AutomationProperties.SetName(element, name);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ScrollTranscriptToEnd()
+
+
+
+    {
+
+
+
+      if (this.FindName("TranscriptScrollViewer") is not ScrollViewer viewer)
+
+
+
+        return;
+
+
+
+
+
+
+
+      viewer.Dispatcher.BeginInvoke(new Action(() =>
+
+
+
+      {
+
+
+
+        viewer.UpdateLayout();
+
+
+
+        viewer.ScrollToEnd();
+
+
+
+      }), DispatcherPriority.Background);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ResetTranscript(bool includeWelcome = true)
+
+
+
+    {
+
+
+
+      if (this.FindName("Transcript") is not StackPanel transcript)
+
+
+
+        return;
+
+
+
+
+
+
+
+      transcript.Children.Clear();
+
+
+
+
+
+
+
+      if (!includeWelcome)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var welcome = new TextBlock
+
+
+
+      {
+
+
+
+        Text = "Welcome to Codex for Visual Studio",
+
+
+
+        TextWrapping = TextWrapping.Wrap
+
+
+
+      };
+
+
+
+      welcome.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+
+
+      transcript.Children.Add(welcome);
+
+
+
+    }
+
+
+
+
+
+
+
+    private ExecTurn CreateExecTurn(string headerText, string normalizedCommand)
+
+
+
+    {
+
+
+
+      if (this.FindName("Transcript") is not StackPanel transcript)
+
+
+
+        throw new InvalidOperationException("Transcript panel missing");
+
+
+
+
+
+
+
+      var container = new Border
+
+
+
+      {
+
+
+
+        CornerRadius = new CornerRadius(8),
+
+
+
+        Padding = new Thickness(10),
+
+
+
+        Margin = new Thickness(20, 4, 80, 4),
+
+
+
+        BorderThickness = new Thickness(1),
+
+
+
+        MaxWidth = 600,
+
+
+
+        HorizontalAlignment = HorizontalAlignment.Left,
+
+
+
+        Visibility = Visibility.Collapsed
+
+
+
+      };
+
+
+
+      ApplyExecBubbleBrush(container);
+
+
+
+
+
+
+
+      var panel = new StackPanel();
+
+
+
+      var headerTextValue = string.IsNullOrWhiteSpace(headerText) ? "$ exec" : headerText.Trim();
+
+
+
+
+
+
+
+      Button CreateHeaderButton(string accessText, RoutedEventHandler handler, double minWidth, Thickness? margin = null)
+
+
+
+      {
+
+
+
+        var button = new Button
+
+
+
+        {
+
+
+
+          Content = new AccessText { Text = accessText },
+
+
+
+          Margin = margin ?? new Thickness(6, 0, 0, 4),
+
+
+
+          MinWidth = minWidth,
+
+
+
+          Height = 24,
+
+
+
+          HorizontalAlignment = HorizontalAlignment.Left
+
+
+
+        };
+
+
+
+        button.Click += handler;
+
+
+
+        return button;
+
+
+
+      }
+
+
+
+
+
+
+
+      var cancelButton = CreateHeaderButton("_Cancel", OnExecCancelClick, 70, new Thickness(8, 0, 0, 4));
+
+
+
+      cancelButton.Visibility = Visibility.Collapsed;
+
+
+
+
+
+
+
+      var copyButton = CreateHeaderButton("Cop_y All", OnExecCopyAllClick, 80);
+
+
+
+      var clearButton = CreateHeaderButton("C_lear Output", OnExecClearClick, 100);
+
+
+
+      var exportButton = CreateHeaderButton("_Export", OnExecExportClick, 80);
+
+
+
+
+
+
+
+      TextBlock headerBlock = null;
+
+
+
+
+
+
+
+      if (!string.IsNullOrEmpty(headerTextValue))
+
+
+
+      {
+
+
+
+        headerBlock = new TextBlock
+
+
+
+        {
+
+
+
+          Text = headerTextValue,
+
+
+
+          FontWeight = FontWeights.SemiBold,
+
+
+
+          TextWrapping = TextWrapping.Wrap,
+
+
+
+          Margin = new Thickness(0, 0, 0, 4),
+
+
+
+          VerticalAlignment = VerticalAlignment.Center
+
+
+
+        };
+
+
+
+        headerBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+
+
+
+
+
+
+        var headerRow = new StackPanel
+
+
+
+        {
+
+
+
+          Orientation = Orientation.Horizontal,
+
+
+
+          VerticalAlignment = VerticalAlignment.Center
+
+
+
+        };
+
+
+
+
+
+
+
+        headerRow.Children.Add(headerBlock);
+
+
+
+        headerRow.Children.Add(cancelButton);
+
+
+
+        headerRow.Children.Add(copyButton);
+
+
+
+        headerRow.Children.Add(clearButton);
+
+
+
+        headerRow.Children.Add(exportButton);
+
+
+
+        panel.Children.Add(headerRow);
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        var buttonRow = new StackPanel
+
+
+
+        {
+
+
+
+          Orientation = Orientation.Horizontal,
+
+
+
+          HorizontalAlignment = HorizontalAlignment.Left,
+
+
+
+          Margin = new Thickness(0, 0, 0, 4)
+
+
+
+        };
+
+
+
+        buttonRow.Children.Add(cancelButton);
+
+
+
+        buttonRow.Children.Add(copyButton);
+
+
+
+        buttonRow.Children.Add(clearButton);
+
+
+
+        buttonRow.Children.Add(exportButton);
+
+
+
+        panel.Children.Add(buttonRow);
+
+
+
+      }
+
+
+
+
+
+
+
+      var bodyBlock = new TextBlock
+
+
+
+      {
+
+
+
+        Text = string.Empty,
+
+
+
+        TextWrapping = TextWrapping.Wrap,
+
+
+
+        FontFamily = new FontFamily("Consolas"),
+
+
+
+        Visibility = Visibility.Visible
+
+
+
+      };
+
+
+
+      bodyBlock.SetResourceReference(TextBlock.ForegroundProperty, VsBrushes.ToolWindowTextKey);
+
+
+
+      AttachCopyContextMenu(bodyBlock);
+
+
+
+
+
+
+
+      panel.Children.Add(bodyBlock);
+
+
+
+      container.Child = panel;
+
+
+
+      transcript.Children.Add(container);
+
+
+
+
+
+
+
+      var execTurn = new ExecTurn(container, bodyBlock, headerBlock, cancelButton, copyButton, clearButton, exportButton, normalizedCommand);
+
+
+
+      bodyBlock.Tag = execTurn;
+
+
+
+      copyButton.Tag = execTurn;
+
+
+
+      clearButton.Tag = execTurn;
+
+
+
+      exportButton.Tag = execTurn;
+
+
+
+      container.Tag = execTurn;
+
+
+
+      container.MaxHeight = _execConsolePreferredHeight;
+
+
+
+      container.PreviewMouseWheel += OnExecContainerPreviewMouseWheel;
+
+
+
+
+
+
+
+      _execConsoleTurns.Add(execTurn);
+
+
+
+      if (_execConsoleTurns.Count > 50)
+
+
+
+        _execConsoleTurns.RemoveAt(0);
+
+
+
+      ApplyExecConsoleVisibility(execTurn);
+
+
+
+
+
+
+
+      return execTurn;
+
+
+
+    }
+
+
+
+
+
+
+
+    private ExecTurn GetOrCreateExecTurn(string id, string header, string normalizedCommand)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrEmpty(id))
+
+
+
+        id = RegisterExecFallbackId();
+
+
+
+
+
+
+
+      if (!_execTurns.TryGetValue(id, out var turn))
+
+
+
+      {
+
+
+
+        turn = CreateExecTurn(header, normalizedCommand);
+
+
+
+        _execTurns[id] = turn;
+
+
+
+      }
+
+
+
+      else if (!string.IsNullOrEmpty(header) && turn.Header != null)
+
+
+
+      {
+
+
+
+        if (string.IsNullOrEmpty(turn.Header.Text) || string.Equals(turn.Header.Text, "$ exec", StringComparison.Ordinal))
+
+
+
+          turn.Header.Text = header;
+
+
+
+      }
+
+
+
+
+
+
+
+      turn.ExecId = id;
+
+
+
+      if (turn.CancelButton != null)
+
+
+
+        turn.CancelButton.Tag = id;
+
+
+
+
+
+
+
+      if (turn.CopyButton != null)
+
+
+
+        turn.CopyButton.Tag = turn;
+
+
+
+
+
+
+
+      if (turn.ClearButton != null)
+
+
+
+        turn.ClearButton.Tag = turn;
+
+
+
+
+
+
+
+      if (turn.ExportButton != null)
+
+
+
+        turn.ExportButton.Tag = turn;
+
+
+
+
+
+
+
+      if (!string.IsNullOrEmpty(normalizedCommand) && string.IsNullOrEmpty(turn.NormalizedCommand))
+
+
+
+        turn.NormalizedCommand = normalizedCommand;
+
+
+
+
+
+
+
+      return turn;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ApplyExecBubbleBrush(Border container)
+
+
+
+    {
+
+
+
+      container.SetResourceReference(Border.BorderBrushProperty, VsBrushes.ToolWindowBorderKey);
+
+
+
+      const double opacity = 0.65;
+
+
+
+      if (TryFindResource(VsBrushes.CommandBarGradientBeginKey) is SolidColorBrush brush)
+
+
+
+      {
+
+
+
+        var clone = brush.Clone();
+
+
+
+        clone.Opacity = opacity;
+
+
+
+        container.Background = clone;
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        container.Background = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 255, 255, 255));
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ApplyChatBubbleBrush(Border container, string role)
+
+
+
+    {
+
+
+
+      var key = role == "assistant" ? VsBrushes.CommandBarGradientEndKey : VsBrushes.CommandBarGradientBeginKey;
+
+
+
+      var opacity = role == "assistant" ? 0.88 : 0.72;
+
+
+
+
+
+
+
+      if (TryFindResource(key) is SolidColorBrush brush)
+
+
+
+      {
+
+
+
+        var clone = brush.Clone();
+
+
+
+        clone.Opacity = opacity;
+
+
+
+        container.Background = clone;
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        container.SetResourceReference(Border.BackgroundProperty, key);
+
+
+
+        container.Opacity = opacity;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractDeltaText(EventMsg evt)
+
+
+
+    {
+
+
+
+      var direct = TryGetString(evt.Raw, "text_delta");
+
+
+
+      if (!string.IsNullOrEmpty(direct))
+
+
+
+        return ChatTextUtilities.StripAnsi(direct);
+
+
+
+
+
+
+
+      var text = CollectText(evt.Raw?["delta"] ?? evt.Raw?["message"]);
+
+
+
+      if (!string.IsNullOrEmpty(text))
+
+
+
+        return ChatTextUtilities.StripAnsi(text);
+
+
+
+
+
+
+
+      text = CollectText(evt.Raw);
+
+
+
+      return ChatTextUtilities.StripAnsi(text);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static IReadOnlyList<McpToolInfo> ExtractMcpTools(JObject obj)
+
+
+
+    {
+
+
+
+      var results = new List<McpToolInfo>();
+
+
+
+      if (obj == null)
+
+
+
+        return results;
+
+
+
+
+
+
+
+      var toolsToken = obj["tools"] ?? obj["items"];
+
+
+
+      if (toolsToken is not JArray array)
+
+
+
+        return results;
+
+
+
+
+
+
+
+      foreach (var token in array)
+
+
+
+      {
+
+
+
+        if (token is not JObject toolObj)
+
+
+
+          continue;
+
+
+
+
+
+
+
+        var name = TryGetString(toolObj, "name", "id", "tool");
+
+
+
+        var description = TryGetString(toolObj, "description", "summary", "detail");
+
+
+
+        var server = TryGetString(toolObj, "server", "provider", "source");
+
+
+
+        results.Add(new McpToolInfo(name, description, server));
+
+
+
+      }
+
+
+
+
+
+
+
+      return results;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static IReadOnlyList<CustomPromptInfo> ExtractCustomPrompts(JObject obj)
+
+
+
+    {
+
+
+
+      var results = new List<CustomPromptInfo>();
+
+
+
+      if (obj == null)
+
+
+
+        return results;
+
+
+
+
+
+
+
+      var promptsToken = obj["prompts"] ?? obj["items"] ?? obj["data"];
+
+
+
+      if (promptsToken is not JArray array)
+
+
+
+        return results;
+
+
+
+
+
+
+
+      foreach (var token in array)
+
+
+
+      {
+
+
+
+        if (token is not JObject promptObj)
+
+
+
+          continue;
+
+
+
+
+
+
+
+        var id = TryGetString(promptObj, "id", "prompt_id", "promptId", "name");
+
+
+
+        var name = TryGetString(promptObj, "name", "title", "label");
+
+
+
+        var description = TryGetString(promptObj, "description", "summary", "detail", "notes");
+
+
+
+        var body = TryGetString(promptObj, "body", "content", "text", "prompt");
+
+
+
+        var source = TryGetString(promptObj, "source", "provider", "server", "scope");
+
+
+
+
+
+
+
+        results.Add(new CustomPromptInfo(id, name, description, body, source));
+
+
+
+      }
+
+
+
+
+
+
+
+      return results;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string FormatToolArguments(JObject raw)
+
+
+
+    {
+
+
+
+      if (raw == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var direct = TryGetString(raw, "arguments_preview", "input_preview", "input_summary");
+
+
+
+      if (!string.IsNullOrWhiteSpace(direct))
+
+
+
+        return direct.Trim();
+
+
+
+
+
+
+
+      var token = raw["arguments"] ?? raw["args"] ?? raw["input"] ?? raw["parameters"];
+
+
+
+      var text = FormatCompactText(token);
+
+
+
+      if (string.IsNullOrEmpty(text))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      return text.StartsWith("Args:", StringComparison.OrdinalIgnoreCase)
+
+
+
+        ? text
+
+
+
+        : $"Args: {text}";
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractToolOutputText(JObject raw)
+
+
+
+    {
+
+
+
+      if (raw == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var direct = TryGetString(raw, "text", "delta", "chunk", "output", "message", "value");
+
+
+
+      if (!string.IsNullOrWhiteSpace(direct))
+
+
+
+        return direct.Trim();
+
+
+
+
+
+
+
+      var token = raw["output"] ?? raw["result"] ?? raw["data"] ?? raw["response"];
+
+
+
+      return FormatCompactText(token);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractToolCompletionDetail(JObject raw)
+
+
+
+    {
+
+
+
+      if (raw == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var direct = TryGetString(raw, "detail", "message", "result_text", "result", "output", "error");
+
+
+
+      if (!string.IsNullOrWhiteSpace(direct))
+
+
+
+        return direct.Trim();
+
+
+
+
+
+
+
+      var token = raw["result"] ?? raw["output"] ?? raw["response"];
+
+
+
+      return FormatCompactText(token);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static bool? InterpretToolStatus(string status)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(status))
+
+
+
+        return null;
+
+
+
+
+
+
+
+      var normalized = status.Trim().ToLowerInvariant();
+
+
+
+      if (normalized is "success" or "succeeded" or "ok" or "completed" or "complete" or "done")
+
+
+
+        return true;
+
+
+
+      if (normalized is "fail" or "failed" or "error" or "errored" or "cancelled" or "canceled" or "aborted" or "timeout")
+
+
+
+        return false;
+
+
+
+      return null;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string FormatCompactText(JToken token, int maxLength = 200)
+
+
+
+    {
+
+
+
+      if (token == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      string text = token.Type switch
+
+
+
+      {
+
+
+
+        JTokenType.String => token.ToString(),
+
+
+
+        JTokenType.Integer or JTokenType.Float or JTokenType.Boolean => token.ToString(),
+
+
+
+        _ => token.ToString(Formatting.None)
+
+
+
+      };
+
+
+
+
+
+
+
+      if (string.IsNullOrWhiteSpace(text))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      text = Regex.Replace(text, "\\s+", " ").Trim();
+
+
+
+      if (text.Length > maxLength)
+
+
+
+        text = text.Substring(0, maxLength) + "...";
+
+
+
+      return text;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractFinalText(EventMsg evt)
+
+
+
+    {
+
+
+
+      var direct = TryGetString(evt.Raw, "text");
+
+
+
+      if (!string.IsNullOrEmpty(direct))
+
+
+
+        return ChatTextUtilities.StripAnsi(direct);
+
+
+
+
+
+
+
+      var text = CollectText(evt.Raw?["message"]);
+
+
+
+      if (!string.IsNullOrEmpty(text))
+
+
+
+        return ChatTextUtilities.StripAnsi(text);
+
+
+
+
+
+
+
+      text = CollectText(evt.Raw);
+
+
+
+      return ChatTextUtilities.StripAnsi(text);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string ExtractStreamErrorMessage(EventMsg evt)
+
+
+
+    {
+
+
+
+      var obj = evt.Raw;
+
+
+
+      string message = TryGetString(obj, "message")
+
+
+
+        ?? TryGetString(obj, "error")
+
+
+
+        ?? TryGetString(obj, "detail")
+
+
+
+        ?? TryGetString(obj, "description");
+
+
+
+
+
+
+
+      if (string.IsNullOrWhiteSpace(message) && obj?["error"] is JObject errorObj)
+
+
+
+      {
+
+
+
+        message = TryGetString(errorObj, "message") ?? TryGetString(errorObj, "detail");
+
+
+
+      }
+
+
+
+
+
+
+
+      return string.IsNullOrWhiteSpace(message) ? "Stream error" : message.Trim();
+
+
+
+    }
+
+
+
+
+
+
+
+    private static (int? total, int? input, int? output) ExtractTokenCounts(EventMsg evt)
+
+
+
+    {
+
+
+
+      var obj = evt.Raw ?? new JObject();
+
+
+
+      var total = ResolveTokenValue(obj, "total", "total_tokens");
+
+
+
+      var input = ResolveTokenValue(obj, "input", "prompt", "input_tokens");
+
+
+
+      var output = ResolveTokenValue(obj, "output", "completion", "output_tokens");
+
+
+
+      return (total, input, output);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static int? ResolveTokenValue(JObject source, params string[] names)
+
+
+
+    {
+
+
+
+      if (source == null)
+
+
+
+        return null;
+
+
+
+
+
+
+
+      foreach (var name in names)
+
+
+
+      {
+
+
+
+        if (TryReadInt(source[name], out var value))
+
+
+
+          return value;
+
+
+
+      }
+
+
+
+
+
+
+
+      foreach (var container in new[] { "counts", "usage", "token_counts" })
+
+
+
+      {
+
+
+
+        if (source[container] is JObject nested)
+
+
+
+        {
+
+
+
+          foreach (var name in names)
+
+
+
+          {
+
+
+
+            if (TryReadInt(nested[name], out var value))
+
+
+
+              return value;
+
+
+
+          }
+
+
+
+        }
+
+
+
+      }
+
+
+
+
+
+
+
+      return null;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static bool TryReadInt(JToken token, out int value)
+
+
+
+    {
+
+
+
+      value = 0;
+
+
+
+      if (token == null)
+
+
+
+        return false;
+
+
+
+      if (token.Type == JTokenType.Integer)
+
+
+
+      {
+
+
+
+        value = token.Value<int>();
+
+
+
+        return true;
+
+
+
+      }
+
+
+
+      if (token.Type == JTokenType.Float)
+
+
+
+      {
+
+
+
+        value = (int)Math.Round(token.Value<double>());
+
+
+
+        return true;
+
+
+
+      }
+
+
+
+      var text = token.ToString();
+
+
+
+      return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateTokenUsage(int? total, int? input, int? output)
+
+
+
+    {
+
+
+
+      if (this.FindName("TokenUsageText") is not TextBlock block)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var builder = new StringBuilder();
+
+
+
+      if (total.HasValue)
+
+
+
+        builder.Append($"total {total.Value}");
+
+
+
+
+
+
+
+      var ioParts = new List<string>();
+
+
+
+      if (input.HasValue)
+
+
+
+        ioParts.Add($"in {input.Value}");
+
+
+
+      if (output.HasValue)
+
+
+
+        ioParts.Add($"out {output.Value}");
+
+
+
+
+
+
+
+      if (ioParts.Count > 0)
+
+
+
+      {
+
+
+
+        if (builder.Length > 0)
+
+
+
+          builder.Append(' ');
+
+
+
+        builder.Append('(');
+
+
+
+        builder.Append(string.Join(", ", ioParts));
+
+
+
+        builder.Append(')');
+
+
+
+      }
+
+
+
+
+
+
+
+      if (builder.Length == 0)
+
+
+
+      {
+
+
+
+        block.Text = string.Empty;
+
+
+
+        block.Visibility = Visibility.Collapsed;
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      block.Text = $"Tokens: {builder}";
+
+
+
+      block.Visibility = Visibility.Visible;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ClearTokenUsage()
+
+
+
+    {
+
+
+
+      if (this.FindName("TokenUsageText") is not TextBlock block)
+
+
+
+        return;
+
+
+
+      block.Text = string.Empty;
+
+
+
+      block.Visibility = Visibility.Collapsed;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void UpdateTelemetryUi()
+
+
+
+    {
+
+
+
+      if (this.FindName("TelemetryText") is not TextBlock block)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var summary = _telemetry.GetSummary();
+
+
+
+      if (string.IsNullOrEmpty(summary))
+
+
+
+      {
+
+
+
+        block.Text = string.Empty;
+
+
+
+        block.Visibility = Visibility.Collapsed;
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        block.Text = summary;
+
+
+
+        block.Visibility = Visibility.Visible;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void ShowStreamErrorBanner(string message, bool canRetry)
+
+
+
+    {
+
+
+
+      if (this.FindName("StreamErrorText") is TextBlock text)
+
+
+
+        text.Text = string.IsNullOrWhiteSpace(message) ? "Stream error" : message;
+
+
+
+      if (this.FindName("StreamRetryButton") is Button retry)
+
+
+
+        retry.IsEnabled = canRetry;
+
+
+
+      if (this.FindName("StreamErrorBanner") is Border banner)
+
+
+
+        banner.Visibility = Visibility.Visible;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void HideStreamErrorBanner()
+
+
+
+    {
+
+
+
+      if (this.FindName("StreamErrorBanner") is Border banner)
+
+
+
+        banner.Visibility = Visibility.Collapsed;
+
+
+
+    }
+
+
+
+
+
+
+
+    public void AppendSelectionToInput(string text)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(text)) return;
+
+
+
+      var box = this.FindName("InputBox") as TextBox;
+
+
+
+      if (box != null)
+
+
+
+      {
+
+
+
+        if (!string.IsNullOrEmpty(box.Text))
+
+
+
+          box.Text += "\n";
+
+
+
+        box.Text += text;
+
+
+
+        box.Focus();
+
+
+
+        box.CaretIndex = box.Text.Length;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnInputPreviewKeyDown(object sender, KeyEventArgs e)
+
+
+
+    {
+
+
+
+      if (e.Key != Key.Enter)
+
+
+
+        return;
+
+
+
+
+
+
+
+      var modifiers = Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt | ModifierKeys.Windows);
+
+
+
+      if (modifiers != ModifierKeys.None)
+
+
+
+        return;
+
+
+
+
+
+
+
+      e.Handled = true;
+
+
+
+      var box = sender as TextBox;
+
+
+
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(box?.Text, fromRetry: false));
+
+
+
+    }
+
+
+
+
+
+
+
+    private async void OnSendClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var box = this.FindName("InputBox") as TextBox;
+
+
+
+        await SendUserInputAsync(box?.Text, fromRetry: false);
+
+
+
+      }
+
+
+
+      catch (Exception ex)
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        await pane.WriteLineAsync($"[error] OnSendClick failed: {ex.Message}");
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task SendUserInputAsync(string text, bool fromRetry)
+
+
+
+    {
+
+
+
+      var payloadText = string.IsNullOrWhiteSpace(text) ? string.Empty : text.Trim();
+
+
+
+      if (string.IsNullOrEmpty(payloadText))
+
+
+
+        return;
+
+
+
+
+
+
+
+      await EnsureWorkingDirectoryUpToDateAsync(fromRetry ? "stream-retry" : "send-user-input");
+
+
+
+
+
+
+
+      var host = _host;
+
+
+
+      if (host == null)
+
+
+
+        return;
+
+
+
+
+
+
+
+      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+
+
+      ClearTokenUsage();
+
+
+
+      HideStreamErrorBanner();
+
+
+
+
+
+
+
+      if (!fromRetry)
+
+
+
+      {
+
+
+
+        _ = CreateChatBubble("user", payloadText);
+
+
+
+      }
+
+
+
+
+
+
+
+      var btn = this.FindName("SendButton") as Button;
+
+
+
+      var status = this.FindName("StatusText") as TextBlock;
+
+
+
+
+
+
+
+      var json = ChatTextUtilities.CreateUserInputSubmission(payloadText);
+
+
+
+      var pane = await DiagnosticsPane.GetAsync();
+
+
+
+      await pane.WriteLineAsync($"[debug] submission {json}");
+
+
+
+
+
+
+
+      var ok = await host.SendAsync(json);
+
+
+
+
+
+
+
+      if (!ok)
+
+
+
+      {
+
+
+
+        if (btn != null) btn.IsEnabled = true;
+
+
+
+        if (status != null) status.Text = "Send failed";
+
+
+
+        _telemetry.CancelTurn();
+
+
+
+        UpdateTelemetryUi();
+
+
+
+        UpdateStreamingIndicator(false);
+
+
+
+        return;
+
+
+
+      }
+
+
+
+
+
+
+
+      if (btn != null) btn.IsEnabled = false;
+
+
+
+      if (status != null) status.Text = "Streaming...";
+
+
+
+      UpdateStreamingIndicator(true);
+
+
+
+      _telemetry.BeginTurn();
+
+
+
+      UpdateTelemetryUi();
+
+
+
+      if (!fromRetry)
+
+
+
+        _lastUserInput = payloadText;
+
+
+
+
+
+
+
+      if (!fromRetry && this.FindName("InputBox") is TextBox input)
+
+
+
+        input.Clear();
+
+
+
+    }
+
+
+
+
+
+
+
+    private async Task<bool> SendExecCancelAsync(string execId)
+
+
+
+    {
+
+
+
+      var host = _host;
+
+
+
+      if (host == null || string.IsNullOrEmpty(execId))
+
+
+
+        return false;
+
+
+
+
+
+
+
+      var submission = new JObject
+
+
+
+      {
+
+
+
+        ["id"] = Guid.NewGuid().ToString(),
+
+
+
+        ["op"] = new JObject
+
+
+
+        {
+
+
+
+          ["type"] = "exec_cancel",
+
+
+
+          ["id"] = execId,
+
+
+
+          ["call_id"] = execId
+
+
+
+        }
+
+
+
+      };
+
+
+
+
+
+
+
+      var json = submission.ToString(Formatting.None);
+
+
+
+      var pane = await DiagnosticsPane.GetAsync();
+
+
+
+      await pane.WriteLineAsync($"[debug] exec cancel submission {json}");
+
+
+
+
+
+
+
+      var ok = await host.SendAsync(json);
+
+
+
+      if (ok)
+
+
+
+      {
+
+
+
+        await pane.WriteLineAsync($"[info] Requested cancel for exec {execId}");
+
+
+
+      }
+
+
+
+      else
+
+
+
+      {
+
+
+
+        await pane.WriteLineAsync($"[warn] Failed to send exec cancel for {execId}");
+
+
+
+      }
+
+
+
+
+
+
+
+      return ok;
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnStreamRetryClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      var text = _lastUserInput;
+
+
+
+      if (string.IsNullOrEmpty(text))
+
+
+
+        return;
+
+
+
+      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(text, fromRetry: true));
+
+
+
+    }
+
+
+
+
+
+
+
+    private void OnStreamDismissClick(object sender, RoutedEventArgs e)
+
+
+
+    {
+
+
+
+      HideStreamErrorBanner();
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CreateUserInputSubmission(string text)
+
+
+
+    {
+
+
+
+      var submission = new JObject
+
+
+
+      {
+
+
+
+        ["id"] = Guid.NewGuid().ToString(),
+
+
+
+        ["op"] = new JObject
+
+
+
+        {
+
+
+
+          ["type"] = "user_input",
+
+
+
+          ["items"] = new JArray
+
+
+
+          {
+
+
+
+            new JObject
+
+
+
+            {
+
+
+
+              ["type"] = "text",
+
+
+
+              ["text"] = text
+
+
+
+            }
+
+
+
+          }
+
+
+
+        }
+
+
+
+      };
+
+
+
+      return submission.ToString(Formatting.None);
+
+
+
+    }
+
+
+
+
+
+
+
+    private static async Task LogAssistantTextAsync(string text)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(text))
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+
+
+
+        await pane.WriteLineAsync($"[assistant] {timestamp} {text}");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // best effort logging
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static async Task LogTelemetryAsync(string eventName, Dictionary<string, object> properties = null)
+
+
+
+    {
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+
+
+
+        var props = properties != null ? string.Join(", ", properties.Select(kvp => $"{kvp.Key}={kvp.Value}")) : "";
+
+
+
+        var message = string.IsNullOrEmpty(props) ? eventName : $"{eventName} ({props})";
+
+
+
+        await pane.WriteLineAsync($"[telemetry] {timestamp} {message}");
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // best effort logging
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static async Task WriteExecDiagnosticsAsync(string text)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrWhiteSpace(text))
+
+
+
+        return;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var pane = await DiagnosticsPane.GetAsync();
+
+
+
+        using var reader = new StringReader(text);
+
+
+
+        string line;
+
+
+
+        while ((line = reader.ReadLine()) != null)
+
+
+
+        {
+
+
+
+          if (string.IsNullOrWhiteSpace(line))
+
+
+
+            continue;
+
+
+
+          await pane.WriteLineAsync($"[exec] {line.TrimEnd()}");
+
+
+
+        }
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        // diagnostics logging is best effort
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CollectText(JToken token)
+
+
+
+    {
+
+
+
+      if (token == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      return token.Type switch
+
+
+
+      {
+
+
+
+        JTokenType.String => token.ToString(),
+
+
+
+        JTokenType.Object => CollectTextFromObject((JObject)token),
+
+
+
+        JTokenType.Array => string.Concat(token.Children().Select(CollectText)),
+
+
+
+        _ => string.Empty
+
+
+
+      };
+
+
+
+    }
+
+
+
+
+
+
+
+    private static string CollectTextFromObject(JObject obj)
+
+
+
+    {
+
+
+
+      if (obj == null)
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      if (obj["text"] is JToken textToken && textToken.Type == JTokenType.String)
+
+
+
+        return textToken.ToString();
+
+
+
+
+
+
+
+      if (obj["value"] is JToken valueToken && valueToken.Type == JTokenType.String)
+
+
+
+        return valueToken.ToString();
+
+
+
+
+
+
+
+      foreach (var key in new[] { "content", "message", "delta", "data" })
+
+
+
+      {
+
+
+
+        var child = obj[key];
+
+
+
+        var text = CollectText(child);
+
+
+
+        if (!string.IsNullOrEmpty(text))
+
+
+
+          return text;
+
+
+
+      }
+
+
+
+
+
+
+
+      return string.Empty;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static readonly Regex Base64Regex = new(@"^[A-Za-z0-9+/=\r\n]+$", RegexOptions.Compiled);
+
+
+
+
+
+
+
+    private static string NormalizeExecChunk(string value)
+
+
+
+    {
+
+
+
+      if (string.IsNullOrEmpty(value))
+
+
+
+        return string.Empty;
+
+
+
+
+
+
+
+      var normalized = value.Replace("\r\n", "\n");
+
+
+
+      if (TryDecodeBase64Chunk(normalized, out var decoded))
+
+
+
+        return decoded;
+
+
+
+
+
+
+
+      return normalized;
+
+
+
+    }
+
+
+
+
+
+
+
+    private static bool TryDecodeBase64Chunk(string value, out string decoded)
+
+
+
+    {
+
+
+
+      decoded = string.Empty;
+
+
+
+      if (string.IsNullOrWhiteSpace(value))
+
+
+
+        return false;
+
+
+
+
+
+
+
+      var trimmed = value.Trim();
+
+
+
+      if (trimmed.Length < 8 || trimmed.Length % 4 != 0)
+
+
+
+        return false;
+
+
+
+      if (!Base64Regex.IsMatch(trimmed))
+
+
+
+        return false;
+
+
+
+
+
+
+
+      try
+
+
+
+      {
+
+
+
+        var bytes = Convert.FromBase64String(trimmed);
+
+
+
+        if (bytes.Length == 0)
+
+
+
+          return false;
+
+
+
+        decoded = Encoding.UTF8.GetString(bytes);
+
+
+
+        if (string.IsNullOrEmpty(decoded))
+
+
+
+          return false;
+
+
+
+        return true;
+
+
+
+      }
+
+
+
+      catch
+
+
+
+      {
+
+
+
+        return false;
+
+
+
+      }
+
+
+
+    }
+
+
+
+
+
+
+
+  }
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

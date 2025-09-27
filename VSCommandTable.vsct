@@ -1,38 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
   <Extern href="stdidcmd.h"/>
+  <Includes>
+    <Include href="VSGlobals.vsct" />
+    <Include href="AppIDCmdUsed.vsct" />
+    <Include href="EmulatorCmdUsed.vsct" />
+    <Include href="Menus.vsct" />
+    <Include href="RazorCmdUsed.vsct" />
+    <Include href="SharedCmdDef.vsct" />
+    <Include href="SharedCmdPlace.vsct" />
+    <Include href="ShellCmdDef.vsct" />
+    <Include href="ShellCmdPlace.vsct" />
+    <Include href="venusmenu.vsct" />
+    <Include href="VsDbgCmdPlace.vsct" />
+    <Include href="VsDbgCmdUsed.vsct" />
+  </Includes>
   <Extern href="vsshlids.h"/>
   <Commands package="guidCodexVS22">
+
     <Groups>
+
       <Group guid="guidCodexVS22" id="EditorContextGroup" priority="0x0200">
+
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN"/>
+
       </Group>
+
       <Group guid="guidCodexVS22" id="ToolsMenuGroup" priority="0x0200">
+
         <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+
       </Group>
+
     </Groups>
+
     <Buttons>
+
       <Button guid="guidCodexVS22" id="OpenCodexCommand" priority="0x0100" type="Button">
+
         <Parent guid="guidCodexVS22" id="ToolsMenuGroup"/>
+
         <Strings><ButtonText>Open Codex</ButtonText></Strings>
+
       </Button>
+
       <Button guid="guidCodexVS22" id="AddToChatCommand" priority="0x0101" type="Button">
+
         <Parent guid="guidCodexVS22" id="EditorContextGroup"/>
+
         <Strings><ButtonText>Add to Codex chat</ButtonText></Strings>
+
       </Button>
+
       <Button guid="guidCodexVS22" id="DiagnosticsCommand" priority="0x0102" type="Button">
+
         <Parent guid="guidCodexVS22" id="ToolsMenuGroup"/>
+
         <Strings><ButtonText>Codex Diagnostics</ButtonText></Strings>
+
       </Button>
+
     </Buttons>
+
   </Commands>
+
   <Symbols>
+
     <GuidSymbol name="guidCodexVS22" value="669931b4-ca2e-4836-8904-cd6231e8a278">
+
       <IDSymbol name="EditorContextGroup" value="0x1001"/>
+
       <IDSymbol name="ToolsMenuGroup" value="0x1002"/>
+
       <IDSymbol name="OpenCodexCommand" value="0x0100"/>
+
       <IDSymbol name="AddToChatCommand" value="0x0101"/>
+
       <IDSymbol name="DiagnosticsCommand" value="0x0102"/>
+
     </GuidSymbol>
+
   </Symbols>
+
 </CommandTable>
+
