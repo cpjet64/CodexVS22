@@ -1,4 +1,4 @@
-﻿# Codex for Visual Studio 2022
+# Codex for Visual Studio 2022
 
 Codex for Visual Studio 2022 brings the Codex CLI into Microsoft Visual Studio so that you can chat with the Codex agent, run guided commands, review diffs, and interact with MCP tools without leaving the editor.
 
@@ -112,4 +112,4 @@ See `docs/troubleshooting.md` for guidance on streaming hiccups, diff apply fail
 - Discussions and Q&A can happen via GitHub Discussions (if enabled) or by opening an issue.
 
 ## License
-This repository is provided under the MIT License (see `LICENSE`). The VSIX package also includes the project-specific `EULA.md`; consult both documents before redistribution.
+This repository is provided under the Apache License 2.0 (see `LICENSE`). The VSIX package also includes the project-specific `EULA.md`; consult both documents before redistribution.
