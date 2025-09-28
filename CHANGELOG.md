@@ -129,18 +129,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned Features
-- **Demo GIFs**: Short demonstration videos embedded in README
-- **Marketplace Publication**: Publish to Visual Studio Marketplace
-- **Advanced MCP Support**: Full parameter schema support for MCP tools
-- **Custom Options UI**: Enhanced options page with test connection button
-- **Settings Migration**: Import settings from VS Code extension
-- **Performance Improvements**: Optimizations for large tool lists
-- **Additional Tests**: More comprehensive test coverage
-- **Documentation**: Enhanced documentation and user guides
+### Added
+- Documentation: architecture overview, troubleshooting guide, onboarding checklist, and updated telemetry/privacy notes for the refactor.
+- Planning: blog/release outline captured in `docs/docs-onboarding-plan.md`.
 
-### Known Issues
-- None currently tracked
+### Changed
+- README highlights module owners, VS Code parity, and configuration toggles.
+- CHANGELOG ready to record incremental refactor milestones toward v0.2.0.
+
+### Notes
+- See `docs/session-persistence-plan.md` and `docs/telemetry-diagnostics-plan.md` for the new session resume telemetry events.
 
 ---
 

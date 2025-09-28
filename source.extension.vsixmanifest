@@ -4,14 +4,14 @@
     <Identity Id="CodexVS22.4b168616-cd69-4ffb-9f78-bbab9d6cf52f" Version="0.1.0" Language="en-US" Publisher="Curt Petricca" />
     <DisplayName>Codex for Visual Studio 2022</DisplayName>
     <Description>AI-powered coding assistant for Visual Studio 2022. Integrates with Codex CLI to provide intelligent code suggestions, chat, diff/exec/approvals, and MCP tool support.</Description>
+    <MoreInfoUrl>https://github.com/curtp/codex-vs22</MoreInfoUrl>
+    <License>EULA.md</License>
+    <GettingStartedGuide>https://github.com/curtp/codex-vs22/blob/main/README.md</GettingStartedGuide>
+    <ReleaseNotes>Initial release with chat, diff/exec/approvals, MCP tools, and custom prompts support.</ReleaseNotes>
     <Icon>Resources\Icon.png</Icon>
     <PreviewImage>Resources\Icon.png</PreviewImage>
     <Tags>AI;Assistant;Coding;Code Generation;Chat;Productivity;OpenAI;MCP;Tools;Visual Studio;VS2022</Tags>
     <Categories>Coding;Tools;Productivity</Categories>
-    <License>EULA.md</License>
-    <MoreInfoUrl>https://github.com/curtp/codex-vs22</MoreInfoUrl>
-    <GettingStartedGuide>https://github.com/curtp/codex-vs22/blob/main/README.md</GettingStartedGuide>
-    <ReleaseNotes>Initial release with chat, diff/exec/approvals, MCP tools, and custom prompts support.</ReleaseNotes>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)">
@@ -23,5 +23,6 @@
   </Prerequisites>
   <Assets>
     <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <Asset Type="Microsoft.VisualStudio.Assets.License" d:Source="File" Path="EULA.md" />
   </Assets>
 </PackageManifest>

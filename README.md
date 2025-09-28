@@ -17,6 +17,32 @@ Codex for Visual Studio 2022 brings the Codex CLI into Microsoft Visual Studio s
 - Persistent solution scoped settings plus import/export for sharing configurations.
 - Telemetry hooks (opt in) for tracking prompt and tool usage.
 
+## Architecture Overview
+- Modular MVVM layout splits chat, diff, exec, approvals, and MCP workflows across dedicated view-models coordinated by a shared session store.
+- A lightweight session coordinator mediates Codex CLI events, updating stores that drive the tool window without code-behind access.
+- Services wrap VS SDK access (workspace, telemetry, approvals) so the UI binds strictly to observable state.
+- Detailed diagrams for chat, diff, and exec pipelines live in `docs/architecture-diagrams.md`.
+
+```mermaid
+flowchart LR
+    CLI[Codex CLI]
+    Coordinator[Session Coordinator]
+    Chat[Chat Transcript VM]
+    Diff[Diff Review VM]
+    Exec[Exec Console VM]
+    MCP[MCP Tools VM]
+    Approvals[Approvals VM]
+    CLI --> Coordinator
+    Coordinator --> Chat
+    Coordinator --> Diff
+    Coordinator --> Exec
+    Coordinator --> MCP
+    Coordinator --> Approvals
+    Chat --> Approvals
+    Diff --> Approvals
+    Exec --> Approvals
+```
+
 ## Requirements
 - Visual Studio 2022 version 17.6 or newer with the **Visual Studio extension development** workload.
 - Codex CLI installed and available on `PATH`, or configure the absolute path in the Options page.
@@ -39,6 +65,7 @@ Codex for Visual Studio 2022 brings the Codex CLI into Microsoft Visual Studio s
 - WSL integration shells out to `wsl.exe -- codex ...` when enabled.
 - MCP servers are declared in `codex.json`; use the tool window refresh action after editing the file.
 - Execution safeguards route through approval workflows; see `PROMPTS.txt` for built-in command templates.
+- Telemetry and session persistence toggles live under `Tools -> Options -> Codex`; see `docs/telemetry-diagnostics-plan.md` and `docs/session-persistence-plan.md` for policy details.
 
 ## Building From Source
 ```powershell
@@ -55,10 +82,29 @@ Generated artifacts land in `bin/` and can be installed by double-clicking the r
 - Integration validation relies on manual smoke tests noted in `RELEASE_CHECKLIST_v0.1.0.md` and `POST_TEST_SUMMARY_v0.1.0.md`.
 
 ## Contributing
+We split the refactored tool window into clear modules. When opening an issue or pull request, mention the relevant area and ping the listed doc owners.
+
+| Area | Maintainers & Contact Doc | Primary Specs |
+| --- | --- | --- |
+| Chat transcript & streaming | See `docs/chat-viewmodel-design.md` (maintained by Chat leads) | Chat VM, session store integration |
+| Diff review & patch apply | See `docs/diff-module-plan.md` | Diff pipeline, approvals, VS diff services |
+| Exec console | See `docs/exec-module-plan.md` | Exec MVVM + ANSI pipeline |
+| MCP tools & prompts | See `docs/mcp-module-plan.md` | Tool discovery, prompt palettes |
+| Session persistence | See `docs/session-persistence-plan.md` | Resume cache, autosave cadence |
+| Telemetry & diagnostics | See `docs/telemetry-diagnostics-plan.md` | Event names, privacy toggles |
+| Options & onboarding docs | See `docs/options-integration-plan.md` and `docs/docs-onboarding-plan.md` | Options store, onboarding checklist |
+
+Check `docs/docs-onboarding-plan.md` for the latest onboarding checklist, coding standards, and writing guidelines.
 Contributions are welcome. Please:
 1. Open an issue to discuss significant feature ideas.
 2. Follow the provided issue templates for bug reports and feature requests.
 3. Submit pull requests using the template to document testing and rationale.
+
+## Visual Studio Code Parity
+CodexVS22 aims to mirror the official VS Code extension where practical. The current parity status, gaps, and Windows-only items are tracked in `parity-report.md`. Key differences today include WPF-only UI flows, Visual Studio diff services, and session persistence that is unique to this extension.
+
+## Troubleshooting
+See `docs/troubleshooting.md` for guidance on streaming hiccups, diff apply failures, exec console issues, and resume diagnostics. The guide links back to the relevant refactor plans so you can jump straight to the owning module.
 
 ## Support and Feedback
 - File issues on the [GitHub tracker](../../issues).

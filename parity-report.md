@@ -1,5 +1,10 @@
 Codex VSIX Logic-Layer Parity Report
 
+## Quick Summary
+- **Feature parity** is complete for core protocol handling; UI differences remain where VS relies on WPF/VS SDK.
+- **VS-exclusive additions**: session persistence (see `docs/session-persistence-plan.md`), Visual Studio diff integration, and approvals banner workflow.
+- **Known gaps vs VS Code**: command palette shortcuts, live inline edits, and marketplace automation; track progress in Task T19 deliverables.
+
 Scope: Logic-layer features compared to the official Codex VS Code extension.
 
 Verified parity (logic-layer)
