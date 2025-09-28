@@ -1,0 +1,53 @@
+# Cross-partial field usage
+- _activeApproval defined in MyToolWindowControl.xaml.cs:465 used in MyToolWindowControl.Approvals.cs
+- _approvalQueue defined in MyToolWindowControl.xaml.cs:457 used in MyToolWindowControl.Approvals.cs
+- _authGatedSend defined in MyToolWindowControl.xaml.cs:529 used in MyToolWindowControl.Authentication.cs
+- _authKnown defined in MyToolWindowControl.xaml.cs:497 used in MyToolWindowControl.Authentication.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _authMessage defined in MyToolWindowControl.xaml.cs:521 used in MyToolWindowControl.Authentication.cs
+- _authOperationInProgress defined in MyToolWindowControl.xaml.cs:513 used in MyToolWindowControl.Authentication.cs
+- _cliStarted defined in MyToolWindowControl.xaml.cs:585 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _customPromptIndex defined in MyToolWindowControl.xaml.cs:665 used in MyToolWindowControl.Mcp.cs
+- _customPrompts defined in MyToolWindowControl.xaml.cs:417 used in MyToolWindowControl.Mcp.Helpers.cs, MyToolWindowControl.Mcp.cs, MyToolWindowControl.Options.cs
+- _diffDocuments defined in MyToolWindowControl.xaml.cs:809 used in MyToolWindowControl.Mcp.cs
+- _diffTotalLeafCount defined in MyToolWindowControl.xaml.cs:825 used in MyToolWindowControl.Mcp.cs
+- _diffTreeRoots defined in MyToolWindowControl.xaml.cs:801 used in MyToolWindowControl.Mcp.cs
+- _environmentReadyInitialized defined in MyToolWindowControl.xaml.cs:681 used in MyToolWindowControl.Lifecycle.cs
+- _environmentReadySource defined in MyToolWindowControl.xaml.cs:649 used in MyToolWindowControl.Lifecycle.cs
+- _execCommandIndex defined in MyToolWindowControl.xaml.cs:425 used in MyToolWindowControl.Exec.cs
+- _execConsolePreferredHeight defined in MyToolWindowControl.xaml.cs:545 used in MyToolWindowControl.Lifecycle.cs
+- _execConsoleTurns defined in MyToolWindowControl.xaml.cs:393 used in MyToolWindowControl.Exec.Helpers.cs
+- _execIdRemap defined in MyToolWindowControl.xaml.cs:433 used in MyToolWindowControl.Exec.Helpers.cs, MyToolWindowControl.Exec.cs
+- _execTurns defined in MyToolWindowControl.xaml.cs:385 used in MyToolWindowControl.Exec.cs
+- _folderOpenContext defined in MyToolWindowControl.xaml.cs:617 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _heartbeatLock defined in MyToolWindowControl.xaml.cs:721 used in MyToolWindowControl.Heartbeat.cs
+- _heartbeatSending defined in MyToolWindowControl.xaml.cs:745 used in MyToolWindowControl.Heartbeat.cs
+- _heartbeatState defined in MyToolWindowControl.xaml.cs:737 used in MyToolWindowControl.Heartbeat.cs
+- _heartbeatTimer defined in MyToolWindowControl.xaml.cs:729 used in MyToolWindowControl.Heartbeat.cs
+- _host defined in MyToolWindowControl.xaml.cs:369 used in MyToolWindowControl.Approvals.cs, MyToolWindowControl.Authentication.cs, MyToolWindowControl.Exec.cs, MyToolWindowControl.Heartbeat.cs, MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.Windowing.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _hostWindow defined in MyToolWindowControl.xaml.cs:785 used in MyToolWindowControl.Windowing.cs
+- _initializingSelectors defined in MyToolWindowControl.xaml.cs:753 used in MyToolWindowControl.Options.cs
+- _isAuthenticated defined in MyToolWindowControl.xaml.cs:505 used in MyToolWindowControl.Authentication.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _lastExecFallbackId defined in MyToolWindowControl.xaml.cs:537 used in MyToolWindowControl.Exec.Helpers.cs, MyToolWindowControl.Exec.cs
+- _lastKnownSolutionRoot defined in MyToolWindowControl.xaml.cs:633 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs, MyToolWindowControl.WorkingDirectory.cs
+- _lastKnownWorkspaceRoot defined in MyToolWindowControl.xaml.cs:641 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs, MyToolWindowControl.WorkingDirectory.cs
+- _lastPatchCallId defined in MyToolWindowControl.xaml.cs:857 used in MyToolWindowControl.Approvals.cs
+- _lastPatchSignature defined in MyToolWindowControl.xaml.cs:865 used in MyToolWindowControl.Approvals.cs
+- _mcpToolRunIndex defined in MyToolWindowControl.xaml.cs:657 used in MyToolWindowControl.Mcp.Helpers.cs
+- _mcpToolRuns defined in MyToolWindowControl.xaml.cs:409 used in MyToolWindowControl.Mcp.Helpers.cs
+- _mcpTools defined in MyToolWindowControl.xaml.cs:401 used in MyToolWindowControl.Mcp.Helpers.cs, MyToolWindowControl.Mcp.cs, MyToolWindowControl.Options.cs
+- _options defined in MyToolWindowControl.xaml.cs:481 used in MyToolWindowControl.Authentication.cs, MyToolWindowControl.Exec.Helpers.cs, MyToolWindowControl.Exec.cs, MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.Options.cs, MyToolWindowControl.Windowing.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _rememberedExecApprovals defined in MyToolWindowControl.xaml.cs:441 used in MyToolWindowControl.Approvals.cs
+- _rememberedPatchApprovals defined in MyToolWindowControl.xaml.cs:449 used in MyToolWindowControl.Approvals.cs
+- _selectedApprovalMode defined in MyToolWindowControl.xaml.cs:777 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.Options.cs
+- _selectedModel defined in MyToolWindowControl.xaml.cs:761 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.Options.cs
+- _selectedReasoning defined in MyToolWindowControl.xaml.cs:769 used in MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.Options.cs
+- _solutionEvents defined in MyToolWindowControl.xaml.cs:569 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _solutionEventsCookie defined in MyToolWindowControl.xaml.cs:577 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _solutionLoadedContext defined in MyToolWindowControl.xaml.cs:609 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _solutionService defined in MyToolWindowControl.xaml.cs:561 used in MyToolWindowControl.WorkingDirectory.Environment.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _suppressDiffSelectionUpdate defined in MyToolWindowControl.xaml.cs:817 used in MyToolWindowControl.Mcp.cs
+- _suppressExecToggleEvent defined in MyToolWindowControl.xaml.cs:553 used in MyToolWindowControl.Exec.Helpers.cs
+- _waitingForSolutionLoad defined in MyToolWindowControl.xaml.cs:625 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _windowEventsHooked defined in MyToolWindowControl.xaml.cs:793 used in MyToolWindowControl.Windowing.cs
+- _workingDir defined in MyToolWindowControl.xaml.cs:489 used in MyToolWindowControl.Authentication.cs, MyToolWindowControl.Lifecycle.cs, MyToolWindowControl.WorkingDirectory.Subscriptions.cs
+- _workingDirLock defined in MyToolWindowControl.xaml.cs:593 used in MyToolWindowControl.WorkingDirectory.Subscriptions.cs

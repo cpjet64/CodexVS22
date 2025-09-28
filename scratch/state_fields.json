@@ -1,0 +1,732 @@
+[
+  {
+    "file": "ToolWindows/MyToolWindowControl.Authentication.cs",
+    "line": 216,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "int",
+    "name": "_assistantChunkCounter"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.Authentication.cs",
+    "line": 217,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "TelemetryTracker",
+    "name": "_telemetry"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 369,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "CodexCliHost",
+    "name": "_host"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 377,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, AssistantTurn>",
+    "name": "_assistantTurns"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 385,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, ExecTurn>",
+    "name": "_execTurns"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 393,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "List<ExecTurn>",
+    "name": "_execConsoleTurns"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 401,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "ObservableCollection<McpToolInfo>",
+    "name": "_mcpTools"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 409,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "ObservableCollection<McpToolRun>",
+    "name": "_mcpToolRuns"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 417,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "ObservableCollection<CustomPromptInfo>",
+    "name": "_customPrompts"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 425,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, string>",
+    "name": "_execCommandIndex"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 433,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, string>",
+    "name": "_execIdRemap"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 441,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, bool>",
+    "name": "_rememberedExecApprovals"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 449,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, bool>",
+    "name": "_rememberedPatchApprovals"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 457,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Queue<ApprovalRequest>",
+    "name": "_approvalQueue"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 465,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "ApprovalRequest",
+    "name": "_activeApproval"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 473,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastUserInput"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 481,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "CodexOptions",
+    "name": "_options"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 489,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_workingDir"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 497,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_authKnown"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 505,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_isAuthenticated"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 513,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_authOperationInProgress"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 521,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_authMessage"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 529,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_authGatedSend"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 537,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastExecFallbackId"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 545,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "double",
+    "name": "_execConsolePreferredHeight"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 553,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_suppressExecToggleEvent"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 561,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "IVsSolution",
+    "name": "_solutionService"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 569,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "SolutionEventsSink",
+    "name": "_solutionEvents"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 577,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "uint",
+    "name": "_solutionEventsCookie"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 585,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_cliStarted"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 593,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "SemaphoreSlim",
+    "name": "_workingDirLock"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 601,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "string",
+    "name": "ExtensionRoot"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 609,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "UIContext",
+    "name": "_solutionLoadedContext"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 617,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "UIContext",
+    "name": "_folderOpenContext"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 625,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_waitingForSolutionLoad"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 633,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastKnownSolutionRoot"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 641,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastKnownWorkspaceRoot"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 649,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "TaskCompletionSource<EnvironmentSnapshot>",
+    "name": "_environmentReadySource"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 657,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, McpToolRun>",
+    "name": "_mcpToolRunIndex"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 665,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "Dictionary<string, CustomPromptInfo>",
+    "name": "_customPromptIndex"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 673,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": true,
+    "type": "int",
+    "name": "MaxMcpToolRuns"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 681,
+    "access": "private",
+    "static": true,
+    "readonly": false,
+    "const": false,
+    "type": "int",
+    "name": "_environmentReadyInitialized"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 689,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "DateTime",
+    "name": "_lastMcpToolsRefresh"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 697,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "DateTime",
+    "name": "_lastPromptsRefresh"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 705,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": true,
+    "type": "int",
+    "name": "RefreshDebounceSeconds"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 721,
+    "access": "private",
+    "static": false,
+    "readonly": true,
+    "const": false,
+    "type": "object",
+    "name": "_heartbeatLock"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 729,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "Timer",
+    "name": "_heartbeatTimer"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 737,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "HeartbeatState",
+    "name": "_heartbeatState"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 745,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "int",
+    "name": "_heartbeatSending"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 753,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_initializingSelectors"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 761,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_selectedModel"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 769,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_selectedReasoning"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 777,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "CodexOptions.ApprovalMode",
+    "name": "_selectedApprovalMode"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 785,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "System.Windows.Window",
+    "name": "_hostWindow"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 793,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_windowEventsHooked"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 801,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "ObservableCollection<DiffTreeItem>",
+    "name": "_diffTreeRoots"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 809,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "Dictionary<string, DiffDocument>",
+    "name": "_diffDocuments"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 817,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_suppressDiffSelectionUpdate"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 825,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "int",
+    "name": "_diffTotalLeafCount"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 833,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "bool",
+    "name": "_patchApplyInProgress"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 841,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "DateTime?",
+    "name": "_patchApplyStartedAt"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 849,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "int",
+    "name": "_patchApplyExpectedFiles"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 857,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastPatchCallId"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 865,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": false,
+    "type": "string",
+    "name": "_lastPatchSignature"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 873,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "string[]",
+    "name": "ModelOptions"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 929,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "string[]",
+    "name": "ReasoningOptions"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 985,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "CodexOptions.ApprovalMode[]",
+    "name": "ApprovalModeOptions"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 1041,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": true,
+    "type": "string",
+    "name": "DefaultModelName"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 1049,
+    "access": "private",
+    "static": false,
+    "readonly": false,
+    "const": true,
+    "type": "string",
+    "name": "DefaultReasoningValue"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 15125,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "Regex",
+    "name": "AnsiCodeRegex"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 15141,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "Brush[]",
+    "name": "AnsiBrushes"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 15237,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "Brush[]",
+    "name": "AnsiBrightBrushes"
+  },
+  {
+    "file": "ToolWindows/MyToolWindowControl.xaml.cs",
+    "line": 26053,
+    "access": "private",
+    "static": true,
+    "readonly": true,
+    "const": false,
+    "type": "Regex",
+    "name": "Base64Regex"
+  }
+]

@@ -1,0 +1,251 @@
+[
+  {
+    "name": "MyToolWindow",
+    "tag": "UserControl",
+    "events": {
+      "Loaded": "OnLoaded",
+      "Unloaded": "OnUnloaded"
+    }
+  },
+  {
+    "name": "LogoutButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnLogoutClick"
+    }
+  },
+  {
+    "name": "ExecConsoleToggle",
+    "tag": "ToggleButton",
+    "events": {
+      "Checked": "OnExecConsoleToggleChanged",
+      "Unchecked": "OnExecConsoleToggleChanged"
+    }
+  },
+  {
+    "name": "CopyAllButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnCopyAllClick"
+    }
+  },
+  {
+    "name": "ResetApprovalsButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnResetApprovalsClick"
+    }
+  },
+  {
+    "name": "McpToolsContainer",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "McpToolsEmptyText",
+    "tag": "StackPanel",
+    "events": {}
+  },
+  {
+    "name": "McpHelpLink",
+    "tag": "Hyperlink",
+    "events": {
+      "Click": "OnMcpHelpClick"
+    }
+  },
+  {
+    "name": "McpToolsList",
+    "tag": "ItemsControl",
+    "events": {}
+  },
+  {
+    "name": "McpToolRunsContainer",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "McpToolRunsList",
+    "tag": "ItemsControl",
+    "events": {}
+  },
+  {
+    "name": "CustomPromptsContainer",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "CustomPromptsEmptyText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "CustomPromptsList",
+    "tag": "ItemsControl",
+    "events": {}
+  },
+  {
+    "name": "PromptPreview",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "AuthBanner",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "AuthMessage",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "LoginButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnLoginClick"
+    }
+  },
+  {
+    "name": "FullAccessBanner",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "FullAccessText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "ApprovalPromptBanner",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "ApprovalPromptText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "ApprovalRememberCheckBox",
+    "tag": "CheckBox",
+    "events": {}
+  },
+  {
+    "name": "ApprovalApproveButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnApprovalApproveClick"
+    }
+  },
+  {
+    "name": "ApprovalDenyButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnApprovalDenyClick"
+    }
+  },
+  {
+    "name": "ApprovalCombo",
+    "tag": "ComboBox",
+    "events": {
+      "SelectionChanged": "OnApprovalModeChanged"
+    }
+  },
+  {
+    "name": "ModelCombo",
+    "tag": "ComboBox",
+    "events": {
+      "SelectionChanged": "OnModelSelectionChanged"
+    }
+  },
+  {
+    "name": "ReasoningCombo",
+    "tag": "ComboBox",
+    "events": {
+      "SelectionChanged": "OnReasoningSelectionChanged"
+    }
+  },
+  {
+    "name": "DiffTreeContainer",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "DiffSelectionSummary",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "DiscardPatchButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnDiscardPatchClick"
+    }
+  },
+  {
+    "name": "DiffTreeView",
+    "tag": "TreeView",
+    "events": {}
+  },
+  {
+    "name": "TranscriptScrollViewer",
+    "tag": "ScrollViewer",
+    "events": {}
+  },
+  {
+    "name": "Transcript",
+    "tag": "StackPanel",
+    "events": {}
+  },
+  {
+    "name": "StreamErrorBanner",
+    "tag": "Border",
+    "events": {}
+  },
+  {
+    "name": "StreamErrorText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "StreamRetryButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnStreamRetryClick"
+    }
+  },
+  {
+    "name": "TokenUsageText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "TelemetryText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "StreamingIndicator",
+    "tag": "ProgressBar",
+    "events": {}
+  },
+  {
+    "name": "StatusText",
+    "tag": "TextBlock",
+    "events": {}
+  },
+  {
+    "name": "SendButton",
+    "tag": "Button",
+    "events": {
+      "Click": "OnSendClick"
+    }
+  },
+  {
+    "name": "InputBox",
+    "tag": "TextBox",
+    "events": {
+      "PreviewKeyDown": "OnInputPreviewKeyDown"
+    }
+  }
+]

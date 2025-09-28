@@ -1,0 +1,74 @@
+Field,Type,Access,Static,Readonly,Const,File,Line
+_assistantChunkCounter,int,private,no,no,no,ToolWindows/MyToolWindowControl.Authentication.cs,216
+_telemetry,TelemetryTracker,private,no,yes,no,ToolWindows/MyToolWindowControl.Authentication.cs,217
+_host,CodexCliHost,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,369
+_assistantTurns,"Dictionary<string, AssistantTurn>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,377
+_execTurns,"Dictionary<string, ExecTurn>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,385
+_execConsoleTurns,List<ExecTurn>,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,393
+_mcpTools,ObservableCollection<McpToolInfo>,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,401
+_mcpToolRuns,ObservableCollection<McpToolRun>,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,409
+_customPrompts,ObservableCollection<CustomPromptInfo>,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,417
+_execCommandIndex,"Dictionary<string, string>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,425
+_execIdRemap,"Dictionary<string, string>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,433
+_rememberedExecApprovals,"Dictionary<string, bool>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,441
+_rememberedPatchApprovals,"Dictionary<string, bool>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,449
+_approvalQueue,Queue<ApprovalRequest>,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,457
+_activeApproval,ApprovalRequest,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,465
+_lastUserInput,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,473
+_options,CodexOptions,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,481
+_workingDir,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,489
+_authKnown,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,497
+_isAuthenticated,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,505
+_authOperationInProgress,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,513
+_authMessage,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,521
+_authGatedSend,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,529
+_lastExecFallbackId,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,537
+_execConsolePreferredHeight,double,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,545
+_suppressExecToggleEvent,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,553
+_solutionService,IVsSolution,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,561
+_solutionEvents,SolutionEventsSink,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,569
+_solutionEventsCookie,uint,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,577
+_cliStarted,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,585
+_workingDirLock,SemaphoreSlim,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,593
+ExtensionRoot,string,private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,601
+_solutionLoadedContext,UIContext,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,609
+_folderOpenContext,UIContext,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,617
+_waitingForSolutionLoad,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,625
+_lastKnownSolutionRoot,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,633
+_lastKnownWorkspaceRoot,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,641
+_environmentReadySource,TaskCompletionSource<EnvironmentSnapshot>,private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,649
+_mcpToolRunIndex,"Dictionary<string, McpToolRun>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,657
+_customPromptIndex,"Dictionary<string, CustomPromptInfo>",private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,665
+MaxMcpToolRuns,int,private,no,no,yes,ToolWindows/MyToolWindowControl.xaml.cs,673
+_environmentReadyInitialized,int,private,yes,no,no,ToolWindows/MyToolWindowControl.xaml.cs,681
+_lastMcpToolsRefresh,DateTime,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,689
+_lastPromptsRefresh,DateTime,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,697
+RefreshDebounceSeconds,int,private,no,no,yes,ToolWindows/MyToolWindowControl.xaml.cs,705
+_heartbeatLock,object,private,no,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,721
+_heartbeatTimer,Timer,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,729
+_heartbeatState,HeartbeatState,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,737
+_heartbeatSending,int,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,745
+_initializingSelectors,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,753
+_selectedModel,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,761
+_selectedReasoning,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,769
+_selectedApprovalMode,CodexOptions.ApprovalMode,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,777
+_hostWindow,System.Windows.Window,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,785
+_windowEventsHooked,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,793
+_diffTreeRoots,ObservableCollection<DiffTreeItem>,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,801
+_diffDocuments,"Dictionary<string, DiffDocument>",private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,809
+_suppressDiffSelectionUpdate,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,817
+_diffTotalLeafCount,int,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,825
+_patchApplyInProgress,bool,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,833
+_patchApplyStartedAt,DateTime?,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,841
+_patchApplyExpectedFiles,int,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,849
+_lastPatchCallId,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,857
+_lastPatchSignature,string,private,no,no,no,ToolWindows/MyToolWindowControl.xaml.cs,865
+ModelOptions,string[],private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,873
+ReasoningOptions,string[],private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,929
+ApprovalModeOptions,CodexOptions.ApprovalMode[],private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,985
+DefaultModelName,string,private,no,no,yes,ToolWindows/MyToolWindowControl.xaml.cs,1041
+DefaultReasoningValue,string,private,no,no,yes,ToolWindows/MyToolWindowControl.xaml.cs,1049
+AnsiCodeRegex,Regex,private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,15125
+AnsiBrushes,Brush[],private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,15141
+AnsiBrightBrushes,Brush[],private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,15237
+Base64Regex,Regex,private,yes,yes,no,ToolWindows/MyToolWindowControl.xaml.cs,26053

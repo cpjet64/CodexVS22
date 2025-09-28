@@ -1,0 +1,96 @@
+ToolWindows/MyToolWindowControl.Transcript.cs:22:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.cs:36:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:26:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:37:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:64:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:89:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:130:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:138:      ThreadHelper.ThrowIfNotOnUIThread();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:151:      ThreadHelper.ThrowIfNotOnUIThread();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:190:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Environment.cs:213:      ThreadHelper.ThrowIfNotOnUIThread();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:18:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:40:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:64:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:71:          _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnSolutionFullyLoadedAsync);
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:81:            _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnFolderWorkspaceReadyAsync);
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:88:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:105:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await EnsureWorkingDirectoryUpToDateAsync(reason));
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:176:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:178:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:189:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:191:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:201:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:216:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:224:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnSolutionFullyLoadedAsync);
+ToolWindows/MyToolWindowControl.WorkingDirectory.Subscriptions.cs:235:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(OnFolderWorkspaceReadyAsync);
+ToolWindows/MyToolWindowControl.xaml.cs:829:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:909:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:1045:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:1121:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:1257:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:1561:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:1661:          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("session-configured"));
+ToolWindows/MyToolWindowControl.xaml.cs:1665:          _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("session-configured"));
+ToolWindows/MyToolWindowControl.xaml.cs:3293:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:3473:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:3669:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:3805:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:4073:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:4481:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:5325:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:5613:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:5645:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("user-refresh"));
+ToolWindows/MyToolWindowControl.xaml.cs:5709:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:5749:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:5809:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:5841:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("user-refresh"));
+ToolWindows/MyToolWindowControl.xaml.cs:5969:              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.xaml.cs:6004:              _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.xaml.cs:6056:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:6120:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.xaml.cs:6155:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.xaml.cs:6195:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:6223:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:6283:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:6359:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.xaml.cs:6583:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:7035:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:7303:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:7375:      ThreadHelper.JoinableTaskFactory.RunAsync(UpdateFullAccessBannerAsync);
+ToolWindows/MyToolWindowControl.xaml.cs:9491:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:12111:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(box?.Text, fromRetry: false));
+ToolWindows/MyToolWindowControl.xaml.cs:12227:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.xaml.cs:12543:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await SendUserInputAsync(text, fromRetry: true));
+ToolWindows/MyToolWindowControl.Authentication.cs:30:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Exec.cs:22:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Exec.cs:71:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Exec.cs:131:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Exec.cs:167:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Lifecycle.cs:60:      ThreadHelper.JoinableTaskFactory.Run(async () =>
+ToolWindows/MyToolWindowControl.Lifecycle.cs:115:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestMcpToolsAsync("tool-window-loaded"));
+ToolWindows/MyToolWindowControl.Lifecycle.cs:116:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await RequestCustomPromptsAsync("tool-window-loaded"));
+ToolWindows/MyToolWindowControl.Lifecycle.cs:122:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => await CleanupSolutionSubscriptionsAsync());
+ToolWindows/MyToolWindowControl.Options.cs:16:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Options.cs:67:            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Options.cs:79:            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Options.cs:87:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => 
+ToolWindows/MyToolWindowControl.Options.cs:182:      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.Options.cs:186:          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:23:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:46:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:73:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:101:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:126:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Mcp.cs:189:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Heartbeat.cs:73:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.Heartbeat.cs:113:        _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.Heartbeat.cs:146:      _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.Approvals.cs:21:        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Approvals.cs:40:      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(true));
+ToolWindows/MyToolWindowControl.Approvals.cs:45:      ThreadHelper.JoinableTaskFactory.RunAsync(async () => await ResolveActiveApprovalAsync(false));
+ToolWindows/MyToolWindowControl.Approvals.cs:67:        ThreadHelper.JoinableTaskFactory.RunAsync(DisplayNextApprovalAsync);
+ToolWindows/MyToolWindowControl.Approvals.cs:72:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Approvals.cs:119:      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+ToolWindows/MyToolWindowControl.Approvals.cs:171:      ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+ToolWindows/MyToolWindowControl.Approvals.cs:175:          await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

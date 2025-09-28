@@ -1,0 +1,100 @@
+ToolWindows/MyToolWindowControl.Authentication.cs
+  int _assistantChunkCounter
+  [readonly] TelemetryTracker _telemetry
+
+ToolWindows/MyToolWindowControl.Telemetry.cs
+  int _turns
+  int _totalTokens
+  double _totalSeconds
+  int _currentTokens
+  DateTime? _turnStart
+  int _patchSuccesses
+  int _patchFailures
+  double _patchSeconds
+  DateTime? _patchStart
+  int _execCount
+  int _execNonZero
+  double _execSeconds
+  int _toolInvocations
+  int _promptInserts
+
+ToolWindows/MyToolWindowControl.Types.cs
+  [readonly] StringBuilder _outputBuffer
+  string _statusDisplay
+  string _detail
+  string _timingDisplay
+  bool _isRunning
+  DateTimeOffset? _completedUtc
+  string SourceDisplay
+
+ToolWindows/MyToolWindowControl.WorkingDirectory.SolutionEvents.cs
+  [readonly] WeakReference<MyToolWindowControl> _owner
+
+ToolWindows/MyToolWindowControl.xaml.cs
+  CodexCliHost _host
+  [readonly] List<ExecTurn> _execConsoleTurns
+  [readonly] ObservableCollection<McpToolInfo> _mcpTools
+  [readonly] ObservableCollection<McpToolRun> _mcpToolRuns
+  [readonly] ObservableCollection<CustomPromptInfo> _customPrompts
+  [readonly] Queue<ApprovalRequest> _approvalQueue
+  ApprovalRequest _activeApproval
+  string _lastUserInput
+  CodexOptions _options
+  string _workingDir
+  bool _authKnown
+  bool _isAuthenticated
+  bool _authOperationInProgress
+  string _authMessage
+  bool _authGatedSend
+  string _lastExecFallbackId
+  double _execConsolePreferredHeight
+  bool _suppressExecToggleEvent
+  IVsSolution _solutionService
+  SolutionEventsSink _solutionEvents
+  uint _solutionEventsCookie
+  bool _cliStarted
+  [readonly] SemaphoreSlim _workingDirLock
+  [static,readonly] string ExtensionRoot
+  UIContext _solutionLoadedContext
+  UIContext _folderOpenContext
+  bool _waitingForSolutionLoad
+  string _lastKnownSolutionRoot
+  string _lastKnownWorkspaceRoot
+  [static,readonly] TaskCompletionSource<EnvironmentSnapshot> _environmentReadySource
+  [const] int MaxMcpToolRuns
+  [static] int _environmentReadyInitialized
+  DateTime _lastMcpToolsRefresh
+  DateTime _lastPromptsRefresh
+  [const] int RefreshDebounceSeconds
+  [readonly] object _heartbeatLock
+  Timer _heartbeatTimer
+  HeartbeatState _heartbeatState
+  int _heartbeatSending
+  bool _initializingSelectors
+  string _selectedModel
+  string _selectedReasoning
+  CodexOptions.ApprovalMode _selectedApprovalMode
+  System.Windows.Window _hostWindow
+  bool _windowEventsHooked
+  ObservableCollection<DiffTreeItem> _diffTreeRoots
+  bool _suppressDiffSelectionUpdate
+  int _diffTotalLeafCount
+  bool _patchApplyInProgress
+  DateTime? _patchApplyStartedAt
+  int _patchApplyExpectedFiles
+  string _lastPatchCallId
+  string _lastPatchSignature
+  [static,readonly] string[] ModelOptions
+  [static,readonly] string[] ReasoningOptions
+  [static,readonly] CodexOptions.ApprovalMode[] ApprovalModeOptions
+  [const] string DefaultModelName
+  [const] string DefaultReasoningValue
+  [readonly] Action<DiffTreeItem> _onCheckChanged
+  bool? _isChecked
+  bool _isExpanded
+  bool _isUpdating
+  [static,readonly] EnvironmentSnapshot Empty
+  [static,readonly] Regex AnsiCodeRegex
+  [static,readonly] Brush[] AnsiBrushes
+  [static,readonly] Brush[] AnsiBrightBrushes
+  [static,readonly] Regex Base64Regex
