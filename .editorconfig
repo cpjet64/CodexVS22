@@ -28,3 +28,11 @@ csharp_style_var_when_type_is_apparent = true:suggestion
 [*.{xaml,xml}]
 indent_size = 2
 
+[ToolWindows/CodexToolWindow/**.{cs,xaml}]
+dotnet_analyzer_diagnostic.category-StyleCopAnalyzers.severity = warning
+
+[Modules/**/*.cs]
+dotnet_analyzer_diagnostic.category-StyleCopAnalyzers.severity = warning
+
+[Shared/**/*.cs]
+dotnet_analyzer_diagnostic.category-StyleCopAnalyzers.severity = warning

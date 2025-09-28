@@ -1,0 +1,28 @@
+<UserControl x:Class="CodexVS22.ToolWindows.CodexToolWindow.Views.ApprovalsBannerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignWidth="400"
+             d:DesignHeight="80">
+    <Border Background="{DynamicResource VsBrush.StatusBarDefault}"
+            Padding="8"
+            CornerRadius="4">
+        <StackPanel Orientation="Horizontal"
+                    VerticalAlignment="Center">
+            <TextBlock Text="Approvals Pending"
+                       FontWeight="SemiBold"
+                       Margin="0,0,8,0" />
+            <ItemsControl ItemsSource="{Binding PendingApprovals}"
+                          Margin="0,0,8,0" />
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Approve"
+                        Command="{Binding ApproveSelectedCommand}"
+                        Margin="0,0,4,0" />
+                <Button Content="Deny"
+                        Command="{Binding DenySelectedCommand}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

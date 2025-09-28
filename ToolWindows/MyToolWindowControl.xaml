@@ -383,7 +383,7 @@
             </Border>
             <Border Name="FullAccessBanner"
                     Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.EnvironmentWarningBackgroundKey}}"
+                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
                     BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
                     BorderThickness="1"
                     CornerRadius="3"
@@ -392,7 +392,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Name="FullAccessText"
                                VerticalAlignment="Center"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.EnvironmentWarningTextKey}}"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
                                TextWrapping="Wrap"
                                Text="Full Access mode is enabled. Codex may auto-approve exec commands and patches." />
                 </StackPanel>
@@ -527,7 +527,7 @@
                                 </Style>
                             </TreeView.ItemContainerStyle>
                             <TreeView.Resources>
-                                <HierarchicalDataTemplate DataType="{x:Type local:MyToolWindowControl.DiffTreeItem}"
+                                <HierarchicalDataTemplate DataType="{x:Type local:MyToolWindowControl+DiffTreeItem}"
                                                          ItemsSource="{Binding Children}">
                                     <StackPanel Orientation="Horizontal">
                                         <CheckBox IsThreeState="True"

@@ -123,6 +123,8 @@
 
 
 
+
+
   </PropertyGroup>
 
 
@@ -885,11 +887,69 @@
 
 
 
+  <ItemGroup>
+    <Compile Include="Shared\Cli\CliTransportPlaceholder.cs" />
+    <Compile Include="Shared\Messaging\EventHubPlaceholder.cs" />
+    <Compile Include="Shared\Options\OptionsCachePlaceholder.cs" />
+    <Compile Include="Shared\Telemetry\TelemetryPlaceholder.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ApprovalsBannerViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ChatTranscriptViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\DiffReviewViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ExecConsoleViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\McpToolsViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ToolWindowShellViewModel.cs" />
+    <Compile Include="ToolWindows\CodexToolWindow\Views\ApprovalsBannerView.xaml.cs">
+      <DependentUpon>ApprovalsBannerView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ToolWindows\CodexToolWindow\Views\ChatTranscriptView.xaml.cs">
+      <DependentUpon>ChatTranscriptView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ToolWindows\CodexToolWindow\Views\CodexToolWindowView.xaml.cs">
+      <DependentUpon>CodexToolWindowView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ToolWindows\CodexToolWindow\Views\DiffReviewView.xaml.cs">
+      <DependentUpon>DiffReviewView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ToolWindows\CodexToolWindow\Views\ExecConsoleView.xaml.cs">
+      <DependentUpon>ExecConsoleView.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ToolWindows\CodexToolWindow\Views\McpToolsView.xaml.cs">
+      <DependentUpon>McpToolsView.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="ToolWindows\CodexToolWindow\Views\ApprovalsBannerView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ToolWindows\CodexToolWindow\Views\ChatTranscriptView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ToolWindows\CodexToolWindow\Views\CodexToolWindowView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ToolWindows\CodexToolWindow\Views\DiffReviewView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ToolWindows\CodexToolWindow\Views\ExecConsoleView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ToolWindows\CodexToolWindow\Views\McpToolsView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="EULA.md">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+
 </Project>
-
-
-
-
-
-
-

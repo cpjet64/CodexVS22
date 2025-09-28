@@ -1,0 +1,43 @@
+<UserControl x:Class="CodexVS22.ToolWindows.CodexToolWindow.Views.CodexToolWindowView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:CodexVS22.ToolWindows.CodexToolWindow.Views"
+             mc:Ignorable="d"
+             d:DesignWidth="600"
+             d:DesignHeight="600">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <local:ApprovalsBannerView Grid.Row="0" />
+
+        <Grid Grid.Row="1"
+              Margin="0,12,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <local:ChatTranscriptView Grid.Column="0"
+                                      Margin="0,0,12,0" />
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <local:DiffReviewView Grid.Row="0"
+                                      Margin="0,0,0,12" />
+                <local:ExecConsoleView Grid.Row="1" />
+            </Grid>
+        </Grid>
+
+        <local:McpToolsView Grid.Row="2" />
+    </Grid>
+</UserControl>
