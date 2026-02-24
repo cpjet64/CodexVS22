@@ -21,19 +21,15 @@ These are project-wide instructions for humans and AI coding agents working in t
 ## Environment
 
 ### Cache Locations
-All package manager caches are consolidated under `C:\Dev\cache\`:
+All caches are centralized under `C:\Dev\cache\`. These environment variables are set system-wide — do not override them in project config or scripts.
 
 | Cache | Path | Env Variable |
 |---|---|---|
-| Cargo registry/git/bin | `C:\Dev\cache\cargo` | `CARGO_HOME` |
-| Rustup toolchains | `C:\Dev\cache\rustup` | `RUSTUP_HOME` |
-| sccache | `C:\Dev\cache\sccache` | `SCCACHE_DIR` |
-| npm | `C:\Dev\cache\npm` | `npm_config_cache` |
-| pnpm store | `C:\Dev\cache\pnpm-store` | pnpm config |
-| pip | `C:\Dev\cache\pip` | `PIP_CACHE_DIR` |
-| uv | `C:\Dev\cache\uv` | `UV_CACHE_DIR` |
 | NuGet | `C:\Dev\cache\nuget` | `NUGET_PACKAGES` |
-| Yarn | `C:\Dev\cache\yarn` | `YARN_CACHE_FOLDER` |
+
+
+#### NuGet Cache Rules
+- **Do NOT** override `NUGET_PACKAGES` in project files or scripts — the global env var handles this.
 
 ### Agent Temp Directory
 If you need a temporary working directory, use `C:\Dev\agent-temp`. Do NOT use system temp or create temp dirs inside the project.
