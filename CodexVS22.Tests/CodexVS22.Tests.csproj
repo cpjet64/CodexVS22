@@ -5,13 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <RestoreProjectStyle>None</RestoreProjectStyle>
-    <ProjectAssetsFile>$(MSBuildProjectDirectory)\project.assets.json</ProjectAssetsFile>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Newtonsoft.Json">
-      <HintPath>..\packages\Newtonsoft.Json.13.0.1\lib\netstandard2.0\Newtonsoft.Json.dll</HintPath>
-    </Reference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Core\Protocol\Events.cs" Link="Protocol\Events.cs" />

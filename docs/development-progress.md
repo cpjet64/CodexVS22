@@ -43,3 +43,15 @@
   - `& "C:\Users\curtp\.codex\scripts\ensure-vcvars.ps1" -Quiet; dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj -c Release` -> passed (`Correlation tests passed.`).
 - Status note:
   - This closes placeholder scaffolding for core `R4`/`R8` primitives but does not yet complete all `R4`/`R8` acceptance criteria in `todo-refactor.md`.
+
+## 2026-02-26 (Full Pipeline Worktree Pass)
+- Executed `$autonomous-full-development-pipeline` in isolated worktree `agent/full-pipeline-2026-02-26`.
+- Stage 1/2 stabilization updates:
+  - Added PowerShell hygiene script (`scripts/hygiene.ps1`) and updated `Justfile` `hygiene` recipe to avoid Git Bash worktree path failures.
+  - Updated `CodexVS22.Tests/CodexVS22.Tests.csproj` to use `PackageReference` for `Newtonsoft.Json` so test builds resolve dependencies reliably in worktrees.
+- Validation outcomes:
+  - `just ci-fast` passed in worktree.
+  - `dotnet list ... --vulnerable` reported no vulnerable test-project packages.
+  - `dotnet list ... --outdated` reported one update candidate (`Newtonsoft.Json` 13.0.4).
+  - Measured test harness runtime baseline: `44.73s`.
+- Generated final stage roll-up in `PIPELINE-SUMMARY.md`.

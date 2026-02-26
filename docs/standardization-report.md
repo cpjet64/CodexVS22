@@ -54,3 +54,14 @@
   - Added `.AGENTS/plans/refresh-planning-docs-2026-02-26.md`.
 - Immediate next batch:
   - Execute `R4` + `R8`, verify with `just ci-fast`, then proceed to `R5`/`R6` and `R7`/`R10`/`R11`.
+
+## 2026-02-26 23:55 (local)
+- Trigger: full pipeline execution stage closure in isolated worktree.
+- Actions completed:
+  - Fixed worktree-compatible hygiene execution by adding `scripts/hygiene.ps1` and updating `Justfile`.
+  - Updated test project dependency resolution (`CodexVS22.Tests.csproj`) to use `PackageReference` for `Newtonsoft.Json`.
+  - Recorded stage outcomes in `PIPELINE-SUMMARY.md` and tracker docs.
+- Verification summary:
+  - `just ci-fast` passed in worktree.
+  - `dotnet list ... --vulnerable` returned no vulnerable packages for `CodexVS22.Tests`.
+  - `dotnet list ... --outdated` identified `Newtonsoft.Json` update (13.0.3 -> 13.0.4).

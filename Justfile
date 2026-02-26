@@ -7,7 +7,7 @@ ci-fast: hygiene restore build-vsix test
 ci-deep: ci-fast package-check
 
 hygiene:
-    bash scripts/hygiene.sh
+    powershell -NoLogo -File scripts/hygiene.ps1
 
 restore:
     & "C:\Users\curtp\.codex\scripts\ensure-vcvars.ps1" -Quiet; msbuild CodexVS22.sln /t:Restore /m
