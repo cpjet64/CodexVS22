@@ -3,7 +3,11 @@
     "allow": [
       "Bash(msbuild:*)",
       "Bash(verbosity=normal)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(cd /c/Dev/repos/active/CodexJetbrains/.claude/worktrees/ui-redesign && JAVA_HOME=\"/c/Program Files/Eclipse Adoptium/jdk-21.0.8.9-hotspot\" ./gradlew test 2>&1)"
     ],
     "deny": [],
     "ask": []
