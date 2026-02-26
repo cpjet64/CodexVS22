@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local automation/worktree artifacts
+.worktrees/
+coverage.lcov
+junit.xml
+perf.csv
