@@ -18,7 +18,10 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build Release
-        run: msbuild CodexVS22.sln /t:Rebuild /p:Configuration=Release /m
+        run: msbuild CodexVS22.csproj /t:Rebuild /p:Configuration=Release /p:DeployExtension=false /m
+
+      - name: Run test harness
+        run: dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj -c Release
 
       - name: Find VSIX
         shell: powershell

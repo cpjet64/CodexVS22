@@ -11,24 +11,24 @@
 - [x] Update StyleCop/EditorConfig rules to cover new folders.
 - [x] Ensure build still succeeds (`dotnet build` or msbuild) after scaffolding.
 
-## [ ] Task R2 - Codex CLI Host Service (Agent A)
+## [x] Task R2 - Codex CLI Host Service (Agent A)
 - Prompt: Task R2 - Execute each subtask, commit artifacts, and flip this header and items to [x] on completion.
 - Dependencies: Wait for Task R1 scaffolding.
-- [ ] Implement `ICodexCliHost`, `CliSessionService`, and supporting contracts from `docs/cli-host-spec.md`.
-- [ ] Relocate serialization helpers from legacy partials into `Shared/Cli`.
-- [ ] Replace direct `CodexCliHost` usage with service registrations in `CodexVS22Package`.
-- [ ] Provide `ICliMessageRouter` emitting typed envelopes for modules.
-- [ ] Add unit tests for connection, reconnection, heartbeat, and diagnostics flow.
-- [ ] Document migration summary in `docs/cli-host-spec.md` (append "Implementation Notes" section).
+- [x] Implement `ICodexCliHost`, `CliSessionService`, and supporting contracts from `docs/cli-host-spec.md`.
+- [x] Relocate serialization helpers from legacy partials into `Shared/Cli`.
+- [x] Replace direct `CodexCliHost` usage with service registrations in `CodexVS22Package`.
+- [x] Provide `ICliMessageRouter` emitting typed envelopes for modules.
+- [x] Add unit tests for connection, reconnection, heartbeat, and diagnostics flow.
+- [x] Document migration summary in `docs/cli-host-spec.md` (append "Implementation Notes" section).
 
-## [ ] Task R3 - State Stores & Mediator (Agent B)
+## [x] Task R3 - State Stores & Mediator (Agent B)
 - Prompt: Task R3 - Execute each subtask, commit artifacts, and flip this header and items to [x] on completion.
 - Dependencies: Wait for Tasks R1-R2 (CLI host & scaffolding).
-- [ ] Implement `CodexSessionStore`, `WorkspaceContextStore`, and `OptionsCache` per `docs/state-ownership-map.md`.
-- [ ] Create mediator `ICodexSessionCoordinator` handling CLI state, workspace updates, and option changes.
-- [ ] Wire stores to consume events from Task R2 services.
-- [ ] Provide thread-safe change notifications (e.g., `IObservable` or dispatcher-synchronized events).
-- [ ] Add tests covering workspace transitions, option updates, and store resets.
+- [x] Implement `CodexSessionStore`, `WorkspaceContextStore`, and `OptionsCache` per `docs/state-ownership-map.md`.
+- [x] Create mediator `ICodexSessionCoordinator` handling CLI state, workspace updates, and option changes.
+- [x] Wire stores to consume events from Task R2 services.
+- [x] Provide thread-safe change notifications (e.g., `IObservable` or dispatcher-synchronized events).
+- [x] Add tests covering workspace transitions, option updates, and store resets.
 
 ## [ ] Task R4 - Chat Transcript Module (Agent B)
 - Prompt: Task R4 - Execute each subtask, commit artifacts, and flip this header and items to [x] on completion.

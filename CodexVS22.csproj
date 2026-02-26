@@ -16,6 +16,7 @@
 
     <LangVersion>latest</LangVersion>
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
+    <NoWarn>$(NoWarn);CVSTK001;CVSTK002;VSIXCompatibility1001</NoWarn>
 
 
 
@@ -245,6 +246,18 @@
 
 
 
+    <Compile Include="Core\State\CodexSessionCoordinator.cs" />
+
+
+
+    <Compile Include="Core\State\CodexSessionStore.cs" />
+
+
+
+    <Compile Include="Core\State\WorkspaceContextStore.cs" />
+
+
+
     <Compile Include="CodexVS22Package.cs" />
 
 
@@ -469,6 +482,10 @@
 
 
 
+    <Page Include="ToolWindows\Styles\CodexStyles.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="ToolWindows\MyToolWindowControl.xaml">
 
 
@@ -582,6 +599,7 @@
 
 
     <Reference Include="EnvDTE">
+      <Private>False</Private>
 
 
 
@@ -594,6 +612,7 @@
 
 
     <Reference Include="EnvDTE80">
+      <Private>False</Private>
 
 
 
@@ -888,10 +907,25 @@
 
 
   <ItemGroup>
+    <Compile Include="Core\Cli\CliSessionService.cs" />
+    <Compile Include="Core\Cli\DefaultCliMessageRouter.cs" />
+    <Compile Include="Core\Cli\DefaultCodexOptionsProvider.cs" />
+    <Compile Include="Core\Cli\DiagnosticsPaneCliDiagnosticsSink.cs" />
+    <Compile Include="Core\Cli\ProcessCodexCliHost.cs" />
+    <Compile Include="Shared\Cli\CliContracts.cs" />
+    <Compile Include="Shared\Cli\CliHeartbeatHelper.cs" />
+    <Compile Include="Shared\Cli\CliJsonUtilities.cs" />
+    <Compile Include="Shared\Cli\CliSubmissionFactory.cs" />
     <Compile Include="Shared\Cli\CliTransportPlaceholder.cs" />
+    <Compile Include="Shared\Cli\ICliDiagnosticsSink.cs" />
+    <Compile Include="Shared\Cli\ICliMessageRouter.cs" />
+    <Compile Include="Shared\Cli\ICliMessageSerializer.cs" />
+    <Compile Include="Shared\Cli\ICodexCliHost.cs" />
+    <Compile Include="Shared\Cli\ICodexOptionsProvider.cs" />
     <Compile Include="Shared\Messaging\EventHubPlaceholder.cs" />
-    <Compile Include="Shared\Options\OptionsCachePlaceholder.cs" />
+    <Compile Include="Shared\Options\OptionsCache.cs" />
     <Compile Include="Shared\Telemetry\TelemetryPlaceholder.cs" />
+    <Compile Include="Shared\Utilities\ServiceLocator.cs" />
     <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ApprovalsBannerViewModel.cs" />
     <Compile Include="ToolWindows\CodexToolWindow\ViewModels\ChatTranscriptViewModel.cs" />
     <Compile Include="ToolWindows\CodexToolWindow\ViewModels\DiffReviewViewModel.cs" />

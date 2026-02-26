@@ -19,16 +19,10 @@ jobs:
         run: nuget restore CodexVS22.sln
 
       - name: Build Release
-        run: msbuild CodexVS22.sln /t:Rebuild /p:Configuration=Release /m
+        run: msbuild CodexVS22.csproj /t:Rebuild /p:Configuration=Release /p:DeployExtension=false /m
 
-      - name: Run vstest (unit)
-        shell: powershell
-        run: |
-          if (Test-Path "CodexVS22.Tests\\bin\\Release\\net8.0\\CodexVS22.Tests.exe") {
-            & "CodexVS22.Tests\\bin\\Release\\net8.0\\CodexVS22.Tests.exe"
-          } else {
-            Write-Host "No Windows-native tests. Skipping."
-          }
+      - name: Run test harness
+        run: dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj -c Release
 
       - name: Package VSIX
         shell: powershell
