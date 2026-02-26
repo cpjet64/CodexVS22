@@ -1,20 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
   <Extern href="stdidcmd.h"/>
-  <Includes>
-    <Include href="VSGlobals.vsct" />
-    <Include href="AppIDCmdUsed.vsct" />
-    <Include href="EmulatorCmdUsed.vsct" />
-    <Include href="Menus.vsct" />
-    <Include href="RazorCmdUsed.vsct" />
-    <Include href="SharedCmdDef.vsct" />
-    <Include href="SharedCmdPlace.vsct" />
-    <Include href="ShellCmdDef.vsct" />
-    <Include href="ShellCmdPlace.vsct" />
-    <Include href="venusmenu.vsct" />
-    <Include href="VsDbgCmdPlace.vsct" />
-    <Include href="VsDbgCmdUsed.vsct" />
-  </Includes>
   <Extern href="vsshlids.h"/>
   <Commands package="guidCodexVS22">
 
@@ -83,4 +69,3 @@
   </Symbols>
 
 </CommandTable>
-

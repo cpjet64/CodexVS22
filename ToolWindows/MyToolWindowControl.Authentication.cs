@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Community.VisualStudio.Toolkit;
 using CodexVS22.Core;
+using CodexVS22.Shared.Cli;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Threading;
 
@@ -82,7 +83,7 @@ namespace CodexVS22
     }
 
     private async Task HandleAuthenticationResultAsync(
-      CodexCliHost.CodexAuthenticationResult result)
+      CodexAuthenticationResult result)
     {
       var whoami = ExtractFirstLine(result.Message);
       if (result.IsAuthenticated)

@@ -22,5 +22,20 @@
     <Compile Include="..\Core\DiagnosticsBuffer.cs" Link="Core\DiagnosticsBuffer.cs" />
     <Compile Include="..\Core\HealthMetrics.cs" Link="Core\HealthMetrics.cs" />
     <Compile Include="..\Core\StatusBarHealthModel.cs" Link="Core\StatusBarHealthModel.cs" />
+    <Compile Include="..\Shared\Cli\CliContracts.cs" Link="Shared\CliContracts.cs" />
+    <Compile Include="..\Shared\Cli\CliHeartbeatHelper.cs" Link="Shared\CliHeartbeatHelper.cs" />
+    <Compile Include="..\Shared\Cli\CliJsonUtilities.cs" Link="Shared\CliJsonUtilities.cs" />
+    <Compile Include="..\Shared\Cli\CliSubmissionFactory.cs" Link="Shared\CliSubmissionFactory.cs" />
+    <Compile Include="..\Shared\Cli\ICliDiagnosticsSink.cs" Link="Shared\ICliDiagnosticsSink.cs" />
+    <Compile Include="..\Shared\Cli\ICliMessageRouter.cs" Link="Shared\ICliMessageRouter.cs" />
+    <Compile Include="..\Shared\Cli\ICliMessageSerializer.cs" Link="Shared\ICliMessageSerializer.cs" />
+    <Compile Include="..\Shared\Cli\ICodexOptionsProvider.cs" Link="Shared\ICodexOptionsProvider.cs" />
+    <Compile Include="..\Shared\Cli\ICodexCliHost.cs" Link="Shared\ICodexCliHost.cs" />
+    <Compile Include="..\Core\Cli\CliSessionService.cs" Link="Cli\CliSessionService.cs" />
+    <Compile Include="..\Core\State\CodexSessionCoordinator.cs" Link="Core\State\CodexSessionCoordinator.cs" />
+    <Compile Include="..\Core\State\CodexSessionStore.cs" Link="Core\State\CodexSessionStore.cs" />
+    <Compile Include="..\Core\State\WorkspaceContextStore.cs" Link="Core\State\WorkspaceContextStore.cs" />
+    <Compile Include="..\Shared\Options\OptionsCache.cs" Link="Shared\OptionsCache.cs" />
+    <Compile Include="..\Core\Cli\DefaultCliMessageRouter.cs" Link="Cli\DefaultCliMessageRouter.cs" />
   </ItemGroup>
 </Project>

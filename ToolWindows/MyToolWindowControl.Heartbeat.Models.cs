@@ -1,4 +1,5 @@
 using System;
+using CodexVS22.Shared.Cli;
 using Newtonsoft.Json.Linq;
 
 namespace CodexVS22
@@ -7,18 +8,18 @@ namespace CodexVS22
   {
     private sealed class HeartbeatState
     {
-      public HeartbeatState(TimeSpan interval, JObject opTemplate, string opType)
+      public HeartbeatState(CliHeartbeatTemplate template)
       {
-        Interval = interval;
-        OpTemplate = opTemplate;
-        OpType = opType ?? string.Empty;
+        Template = template;
       }
 
-      public TimeSpan Interval { get; }
+      public CliHeartbeatTemplate Template { get; }
 
-      public JObject OpTemplate { get; }
+      public TimeSpan Interval => Template?.Interval ?? TimeSpan.Zero;
 
-      public string OpType { get; }
+      public JObject OpTemplate => Template?.OpTemplate;
+
+      public string OpType => Template?.OperationType ?? string.Empty;
     }
   }
 }

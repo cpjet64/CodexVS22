@@ -9,7 +9,6 @@ namespace CodexVS22.ToolWindows.CodexToolWindow.Views
     {
         public McpToolsView()
         {
-            InitializeComponent();
         }
     }
 }

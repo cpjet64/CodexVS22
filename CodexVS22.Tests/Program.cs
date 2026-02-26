@@ -9,7 +9,7 @@ using Newtonsoft.Json.Linq;
 
 namespace CodexVS22.Tests;
 
-internal static class Program
+internal static partial class Program
 {
   private sealed class TestResult
   {
@@ -57,6 +57,9 @@ internal static class Program
         RunTest(nameof(CodexOptions_ExportToJson), CodexOptions_ExportToJson);
         RunTest(nameof(CodexOptions_ImportFromJson), CodexOptions_ImportFromJson);
         RunTest(nameof(CodexOptions_GetEffectiveValues), CodexOptions_GetEffectiveValues);
+        RunTest(nameof(SessionCoordinator_TracksHostStateAndResetsOnOptionChange), SessionCoordinator_TracksHostStateAndResetsOnOptionChange);
+        RunTest(nameof(WorkspaceContextStore_NormalizesPathsAndRaisesEvents), WorkspaceContextStore_NormalizesPathsAndRaisesEvents);
+        RunTest(nameof(OptionsCache_DerivesEffectiveValues), OptionsCache_DerivesEffectiveValues);
 
     WriteArtifacts();
 

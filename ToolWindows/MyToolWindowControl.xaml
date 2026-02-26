@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="CodexVS22.MyToolWindowControl"
+<UserControl x:Class="CodexVS22.MyToolWindowControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -16,18 +16,32 @@
              Name="MyToolWindow"
              Loaded="OnLoaded"
              Unloaded="OnUnloaded">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles/CodexStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Margin="6">
-            <DockPanel>
+
+        <!-- ======================================================== -->
+        <!-- Row 0 — Header                                           -->
+        <!-- ======================================================== -->
+        <StackPanel Grid.Row="0" Margin="8,8,8,4">
+
+            <!-- Title bar + toolbar buttons -->
+            <DockPanel Margin="0,0,0,6">
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
                     <Button Name="LogoutButton"
-                            Margin="0,0,6,0"
-                            Width="80"
+                            Style="{StaticResource CodexFlatButtonStyle}"
+                            Margin="0,0,2,0"
                             Visibility="Collapsed"
                             KeyboardNavigation.TabIndex="7"
                             AutomationProperties.Name="Log out"
@@ -35,31 +49,31 @@
                         <AccessText Text="Lo_gout" />
                     </Button>
                     <ToggleButton Name="ExecConsoleToggle"
-                                   Width="120"
-                                   Margin="0,0,6,0"
+                                   Style="{StaticResource CodexFlatButtonStyle}"
+                                   Margin="0,0,2,0"
                                    KeyboardNavigation.TabIndex="6"
                                    AutomationProperties.Name="Show or hide exec console"
                                    Checked="OnExecConsoleToggleChanged"
                                    Unchecked="OnExecConsoleToggleChanged">
-                        <AccessText Text="Exec Co_nsole" />
+                        <AccessText Text="Co_nsole" />
                     </ToggleButton>
                     <Button Name="CopyAllButton"
-                            Width="90"
-                            Margin="0,0,6,0"
+                            Style="{StaticResource CodexFlatButtonStyle}"
+                            Margin="0,0,2,0"
                             KeyboardNavigation.TabIndex="7"
                             AutomationProperties.Name="Copy entire transcript"
                             Click="OnCopyAllClick">
-                        <AccessText Text="Cop_y All" />
+                        <AccessText Text="Cop_y" />
                     </Button>
                     <Button Name="ResetApprovalsButton"
-                            Width="120"
-                            Margin="0,0,6,0"
+                            Style="{StaticResource CodexFlatButtonStyle}"
+                            Margin="0,0,2,0"
                             KeyboardNavigation.TabIndex="8"
                             AutomationProperties.Name="Reset approvals"
                             Click="OnResetApprovalsClick">
-                        <AccessText Text="Reset _Approvals" />
+                        <AccessText Text="_Reset" />
                     </Button>
-                    <Button Width="80"
+                    <Button Style="{StaticResource CodexFlatButtonStyle}"
                             KeyboardNavigation.TabIndex="9"
                             AutomationProperties.Name="Clear transcript"
                             Click="OnClearClick">
@@ -67,24 +81,147 @@
                     </Button>
                 </StackPanel>
                 <TextBlock Text="Codex"
-                           FontWeight="Bold"
-                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                           Style="{StaticResource CodexHeadingStyle}" />
             </DockPanel>
+
+            <!-- Compact selectors row -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <Label Content="_Approvals:"
+                           FontSize="11"
+                           Margin="0,0,3,0"
+                           VerticalAlignment="Center"
+                           Target="{Binding ElementName=ApprovalCombo}"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ComboBox Name="ApprovalCombo"
+                              Style="{StaticResource CodexCompactComboStyle}"
+                              Width="130"
+                              SelectionChanged="OnApprovalModeChanged"
+                              VerticalAlignment="Center"
+                              KeyboardNavigation.TabIndex="0"
+                              AutomationProperties.Name="Approval policy selector">
+                        <ComboBoxItem Content="Chat" />
+                        <ComboBoxItem Content="Agent" />
+                        <ComboBoxItem Content="Agent (Full Access)" />
+                    </ComboBox>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
+                    <Label Content="_Model:"
+                           FontSize="11"
+                           Margin="0,0,3,0"
+                           VerticalAlignment="Center"
+                           Target="{Binding ElementName=ModelCombo}"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ComboBox Name="ModelCombo"
+                              Style="{StaticResource CodexCompactComboStyle}"
+                              Width="130"
+                              SelectionChanged="OnModelSelectionChanged"
+                              VerticalAlignment="Center"
+                              KeyboardNavigation.TabIndex="1"
+                              AutomationProperties.Name="Model selector" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Label Content="_Reasoning:"
+                           FontSize="11"
+                           Margin="0,0,3,0"
+                           VerticalAlignment="Center"
+                           Target="{Binding ElementName=ReasoningCombo}"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                    <ComboBox Name="ReasoningCombo"
+                              Style="{StaticResource CodexCompactComboStyle}"
+                              Width="110"
+                              SelectionChanged="OnReasoningSelectionChanged"
+                              VerticalAlignment="Center"
+                              KeyboardNavigation.TabIndex="2"
+                              AutomationProperties.Name="Reasoning effort selector" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Auth Banner -->
+            <Border Name="AuthBanner"
+                    Style="{StaticResource CodexBannerStyle}"
+                    Margin="0,4,0,0"
+                    Visibility="Collapsed">
+                <Grid VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Name="AuthMessage"
+                               Grid.Column="0"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
+                               Text="Codex login required. Click Login to continue." />
+                    <Button Name="LoginButton"
+                            Grid.Column="1"
+                            Style="{StaticResource CodexAccentButtonStyle}"
+                            KeyboardNavigation.TabIndex="7"
+                            AutomationProperties.Name="Log in"
+                            Margin="12,0,0,0"
+                            Click="OnLoginClick">
+                        <AccessText Text="_Login" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Full Access Banner -->
+            <Border Name="FullAccessBanner"
+                    Style="{StaticResource CodexBannerStyle}"
+                    Margin="0,4,0,0"
+                    Visibility="Collapsed">
+                <TextBlock Name="FullAccessText"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
+                           TextWrapping="Wrap"
+                           Text="Full Access mode is enabled. Codex may auto-approve exec commands and patches." />
+            </Border>
+
+            <!-- Approval Prompt Banner -->
+            <Border Name="ApprovalPromptBanner"
+                    Style="{StaticResource CodexBannerStyle}"
+                    Margin="0,4,0,0"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Name="ApprovalPromptText"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
+                               Text="Approve request?" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                        <CheckBox Name="ApprovalRememberCheckBox"
+                                  Content="Remember this decision for this session"
+                                  Margin="0,0,12,0"
+                                  Visibility="Collapsed"
+                                  VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Name="ApprovalApproveButton"
+                                    Style="{StaticResource CodexAccentButtonStyle}"
+                                    Margin="0,0,6,0"
+                                    Click="OnApprovalApproveClick">
+                                <AccessText Text="_Approve" />
+                            </Button>
+                            <Button Name="ApprovalDenyButton"
+                                    Style="{StaticResource CodexSecondaryButtonStyle}"
+                                    Click="OnApprovalDenyClick">
+                                <AccessText Text="_Deny" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- MCP Tools Card -->
             <Border Name="McpToolsContainer"
+                    Style="{StaticResource CodexCardStyle}"
                     Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
                     Visibility="Collapsed">
                 <StackPanel>
                     <DockPanel Margin="0,0,0,4">
                         <TextBlock Text="MCP Tools"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                   Style="{StaticResource CodexHeadingStyle}"
+                                   FontSize="12" />
                         <Button Content="_Refresh"
-                                Width="80"
+                                Style="{StaticResource CodexFlatButtonStyle}"
                                 DockPanel.Dock="Right"
                                 AutomationProperties.Name="Refresh MCP tools"
                                 Click="OnRefreshMcpToolsClick" />
@@ -92,23 +229,22 @@
                     <StackPanel Name="McpToolsEmptyText"
                                 Visibility="Collapsed">
                         <TextBlock Text="No MCP tools available."
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="0,0,0,8" />
                         <TextBlock Text="MCP (Model Context Protocol) servers provide tools and capabilities to Codex."
-                                   TextWrapping="Wrap"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="0,0,0,8" />
                         <TextBlock Text="To configure MCP servers:"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="0,0,0,4" />
                         <TextBlock Text="1. Create a codex.json file in your project root"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="16,0,0,2" />
                         <TextBlock Text="2. Add MCP server configurations"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="16,0,0,2" />
                         <TextBlock Text="3. Restart Codex or refresh tools"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                   Style="{StaticResource CodexBodyStyle}"
                                    Margin="16,0,0,8" />
                         <Hyperlink Name="McpHelpLink"
                                    Click="OnMcpHelpClick"
@@ -120,25 +256,11 @@
                                   Margin="0,4,0,0">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="0,4,0,4"
-                                        Padding="8"
-                                        Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                                        BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                                        BorderThickness="1"
-                                        CornerRadius="3"
-                                        Cursor="Hand"
+                                <Border Style="{StaticResource CodexHoverableItemStyle}"
+                                        Margin="0,4,0,4"
                                         MouseLeftButtonDown="OnMcpToolClick"
                                         MouseEnter="OnMcpToolMouseEnter"
                                         MouseLeave="OnMcpToolMouseLeave">
-                                    <Border.Resources>
-                                        <Style TargetType="Border">
-                                            <Style.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource {x:Static vsfx:VsBrushes.CommandBarHoverKey}}" />
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Resources>
                                     <StackPanel>
                                         <TextBlock Text="{Binding Name}"
                                                    FontWeight="SemiBold"
@@ -146,33 +268,13 @@
                                         <TextBlock Text="{Binding Description}"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
-                                                   Margin="0,4,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                    <Style.Triggers>
-                                                        <Trigger Property="Text" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                                   Margin="0,4,0,0"
+                                                   Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                         <TextBlock Text="{Binding Server}"
                                                    Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
                                                    FontStyle="Italic"
-                                                   Margin="0,4,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                    <Style.Triggers>
-                                                        <Trigger Property="Text" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                                   Margin="0,4,0,0"
+                                                   Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
@@ -180,18 +282,16 @@
                     </ItemsControl>
                 </StackPanel>
             </Border>
+
+            <!-- MCP Tool Runs Card -->
             <Border Name="McpToolRunsContainer"
+                    Style="{StaticResource CodexCardStyle}"
                     Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
                     Visibility="Collapsed">
                 <StackPanel>
                     <TextBlock Text="Tool Activity"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                               Style="{StaticResource CodexHeadingStyle}"
+                               FontSize="12" />
                     <ItemsControl Name="McpToolRunsList"
                                   Margin="0,4,0,0">
                         <ItemsControl.ItemTemplate>
@@ -208,66 +308,34 @@
                                     </DockPanel>
                                     <TextBlock Text="{Binding Server}"
                                                FontStyle="Italic"
-                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Style.Triggers>
-                                                    <Trigger Property="Text" Value="">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                    </Trigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                               Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                     <TextBlock Text="{Binding TimingDisplay}"
-                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Style.Triggers>
-                                                    <Trigger Property="Text" Value="">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                    </Trigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                               Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                     <TextBlock Text="{Binding Detail}"
                                                TextWrapping="Wrap"
-                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Style.Triggers>
-                                                    <Trigger Property="Text" Value="">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                    </Trigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
+                                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
+                                               Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </StackPanel>
             </Border>
+
+            <!-- Custom Prompts Card -->
             <Border Name="CustomPromptsContainer"
+                    Style="{StaticResource CodexCardStyle}"
                     Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
                     Visibility="Collapsed">
                 <StackPanel>
                     <DockPanel Margin="0,0,0,4">
                         <TextBlock Text="Prompt Library"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                   Style="{StaticResource CodexHeadingStyle}"
+                                   FontSize="12" />
                         <Button Content="Re_fresh"
-                                Width="80"
+                                Style="{StaticResource CodexFlatButtonStyle}"
                                 DockPanel.Dock="Right"
                                 AutomationProperties.Name="Refresh prompts"
                                 Click="OnRefreshPromptsClick" />
@@ -280,25 +348,11 @@
                                   Margin="0,4,0,0">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Margin="0,4,0,4"
-                                        Padding="8"
-                                        Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                                        BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                                        BorderThickness="1"
-                                        CornerRadius="3"
-                                        Cursor="Hand"
+                                <Border Style="{StaticResource CodexHoverableItemStyle}"
+                                        Margin="0,4,0,4"
                                         MouseLeftButtonDown="OnCustomPromptClick"
                                         MouseEnter="OnCustomPromptMouseEnter"
                                         MouseLeave="OnCustomPromptMouseLeave">
-                                    <Border.Resources>
-                                        <Style TargetType="Border">
-                                            <Style.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource {x:Static vsfx:VsBrushes.CommandBarHoverKey}}" />
-                                                </Trigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Resources>
                                     <StackPanel>
                                         <DockPanel>
                                             <TextBlock Text="{Binding Name}"
@@ -312,18 +366,8 @@
                                         <TextBlock Text="{Binding Description}"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
-                                                   Margin="0,4,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                    <Style.Triggers>
-                                                        <Trigger Property="Text" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                                   Margin="0,4,0,0"
+                                                   Style="{StaticResource CodexCollapseWhenEmptyStyle}" />
                                         <TextBlock Name="PromptPreview"
                                                    Text="{Binding Body}"
                                                    TextWrapping="Wrap"
@@ -351,163 +395,40 @@
                     </ItemsControl>
                 </StackPanel>
             </Border>
-            <Border Name="AuthBanner"
-                    Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
-                    Visibility="Collapsed">
-                <Grid VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Name="AuthMessage"
-                               Grid.Column="0"
-                               TextWrapping="Wrap"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
-                               Text="Codex login required. Click Login to continue." />
-                    <Button Name="LoginButton"
-                            Grid.Column="1"
-                            Width="80"
-                            KeyboardNavigation.TabIndex="7"
-                            AutomationProperties.Name="Log in"
-                            Margin="12,0,0,0"
-                            Click="OnLoginClick">
-                        <AccessText Text="_Login" />
-                    </Button>
-                </Grid>
-            </Border>
-            <Border Name="FullAccessBanner"
-                    Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
-                    Visibility="Collapsed">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Name="FullAccessText"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
-                               TextWrapping="Wrap"
-                               Text="Full Access mode is enabled. Codex may auto-approve exec commands and patches." />
-                </StackPanel>
-            </Border>
-            <Border Name="ApprovalPromptBanner"
-                    Margin="0,6,0,0"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
-                    Visibility="Collapsed">
-                <StackPanel>
-                    <TextBlock Name="ApprovalPromptText"
-                               TextWrapping="Wrap"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
-                               Text="Approve request?" />
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
-                        <CheckBox Name="ApprovalRememberCheckBox"
-                                  Content="Remember this decision for this session"
-                                  Margin="0,0,12,0"
-                                  Visibility="Collapsed"
-                                  VerticalAlignment="Center" />
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <Button Name="ApprovalApproveButton"
-                                    Width="80"
-                                    Margin="0,0,6,0"
-                                    Click="OnApprovalApproveClick">
-                                <AccessText Text="_Approve" />
-                            </Button>
-                            <Button Name="ApprovalDenyButton"
-                                    Width="80"
-                                    Click="OnApprovalDenyClick">
-                                <AccessText Text="_Deny" />
-                            </Button>
-                        </StackPanel>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
-                    <Label Content="_Approvals:"
-                           Margin="0,0,4,0"
-                           VerticalAlignment="Center"
-                           Target="{Binding ElementName=ApprovalCombo}"
-                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <ComboBox Name="ApprovalCombo"
-                              Width="170"
-                              SelectionChanged="OnApprovalModeChanged"
-                              VerticalAlignment="Center"
-                              KeyboardNavigation.TabIndex="0"
-                              AutomationProperties.Name="Approval policy selector">
-                        <ComboBoxItem Content="Chat" />
-                        <ComboBoxItem Content="Agent" />
-                        <ComboBoxItem Content="Agent (Full Access)" />
-                    </ComboBox>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,12,0" VerticalAlignment="Center">
-                    <Label Content="_Model:"
-                           Margin="0,0,4,0"
-                           VerticalAlignment="Center"
-                           Target="{Binding ElementName=ModelCombo}"
-                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <ComboBox Name="ModelCombo"
-                              Width="170"
-                              SelectionChanged="OnModelSelectionChanged"
-                              VerticalAlignment="Center"
-                              KeyboardNavigation.TabIndex="1"
-                              AutomationProperties.Name="Model selector" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Label Content="_Reasoning:"
-                           Margin="0,0,4,0"
-                           VerticalAlignment="Center"
-                           Target="{Binding ElementName=ReasoningCombo}"
-                           Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <ComboBox Name="ReasoningCombo"
-                              Width="140"
-                              SelectionChanged="OnReasoningSelectionChanged"
-                              VerticalAlignment="Center"
-                              KeyboardNavigation.TabIndex="2"
-                              AutomationProperties.Name="Reasoning effort selector" />
-                </StackPanel>
-            </StackPanel>
+
         </StackPanel>
-        <Grid Grid.Row="1" Margin="6">
+
+        <!-- ======================================================== -->
+        <!-- Row 1 — Chat Area                                        -->
+        <!-- ======================================================== -->
+        <Grid Grid.Row="1" Margin="8,4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
+
+            <!-- Diff / Patch Tree -->
             <Border Grid.Row="0"
                     Name="DiffTreeContainer"
+                    Style="{StaticResource CodexCardStyle}"
                     Visibility="Collapsed"
-                    Margin="0,0,0,12"
-                    Padding="6"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}">
+                    Margin="0,0,0,8">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Top"
                                 Orientation="Horizontal"
                                 VerticalAlignment="Center"
                                 Margin="0,0,0,6">
                         <TextBlock Text="Patches"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                                   Style="{StaticResource CodexHeadingStyle}"
+                                   FontSize="12" />
                         <TextBlock Name="DiffSelectionSummary"
                                    Margin="12,0,0,0"
                                    Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
                                    Visibility="Collapsed"
                                    AutomationProperties.Name="Selected diff summary" />
                         <Button Name="DiscardPatchButton"
+                                Style="{StaticResource CodexSecondaryButtonStyle}"
                                 Margin="12,0,0,0"
-                                Padding="8,0"
                                 Visibility="Collapsed"
                                 AutomationProperties.Name="Discard Codex patch"
                                 Click="OnDiscardPatchClick">
@@ -546,6 +467,8 @@
                     </ScrollViewer>
                 </DockPanel>
             </Border>
+
+            <!-- Transcript -->
             <ScrollViewer x:Name="TranscriptScrollViewer"
                           Grid.Row="1"
                           VerticalScrollBarVisibility="Auto"
@@ -554,26 +477,37 @@
                           AutomationProperties.Name="Chat transcript"
                           AutomationProperties.AutomationId="TranscriptViewer">
                 <StackPanel Name="Transcript"
+                            Margin="4,0"
                             HorizontalAlignment="Stretch">
                     <TextBlock Text="Welcome to Codex for Visual Studio"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
+                               Style="{StaticResource CodexHeadingStyle}"
+                               HorizontalAlignment="Center"
+                               Margin="0,24,0,4" />
+                    <TextBlock Text="Type a message to get started."
+                               Style="{StaticResource CodexSecondaryStyle}"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,24" />
                 </StackPanel>
             </ScrollViewer>
         </Grid>
-        <Grid Grid.Row="2" Margin="6">
+
+        <!-- ======================================================== -->
+        <!-- Row 2 — Input Area                                       -->
+        <!-- ======================================================== -->
+        <Grid Grid.Row="2" Margin="8,4,8,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
+
+            <!-- Stream Error Banner -->
             <Border Grid.Row="0"
                     Name="StreamErrorBanner"
-                    Background="{DynamicResource {x:Static vsfx:VsBrushes.InfoBackgroundKey}}"
-                    BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}"
-                    BorderThickness="1"
-                    CornerRadius="3"
-                    Padding="6"
+                    Style="{StaticResource CodexBannerStyle}"
                     Visibility="Collapsed"
-                    Margin="0,0,0,6">
+                    Margin="0,0,0,4">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Name="StreamErrorText"
                                VerticalAlignment="Center"
@@ -581,14 +515,14 @@
                                Foreground="{DynamicResource {x:Static vsfx:VsBrushes.InfoTextKey}}"
                                Text="Stream error" />
                     <Button Name="StreamRetryButton"
-                            Width="60"
+                            Style="{StaticResource CodexAccentButtonStyle}"
                             Margin="12,0,0,0"
                             KeyboardNavigation.TabIndex="8"
                             AutomationProperties.Name="Retry streaming"
                             Click="OnStreamRetryClick">
                         <AccessText Text="_Retry" />
                     </Button>
-                    <Button Width="70"
+                    <Button Style="{StaticResource CodexSecondaryButtonStyle}"
                             Margin="6,0,0,0"
                             KeyboardNavigation.TabIndex="9"
                             AutomationProperties.Name="Dismiss streaming error"
@@ -597,57 +531,88 @@
                     </Button>
                 </StackPanel>
             </Border>
-            <DockPanel Grid.Row="1">
+
+            <!-- Streaming indicator — thin accent bar -->
+            <ProgressBar Grid.Row="1"
+                         Name="StreamingIndicator"
+                         Height="2"
+                         IsIndeterminate="True"
+                         Visibility="Collapsed"
+                         Margin="0,0,0,4"
+                         AutomationProperties.Name="Streaming in progress indicator" />
+
+            <!-- Input + Send button -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Hidden label for keyboard accelerator Alt+M -->
                 <Label Content="_Message:"
-                       DockPanel.Dock="Left"
-                       VerticalAlignment="Center"
-                       Margin="0,0,8,0"
-                       Target="{Binding ElementName=InputBox}"
-                       Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <TextBlock Name="TokenUsageText"
+                       Visibility="Collapsed"
+                       Target="{Binding ElementName=InputBox}" />
+
+                <!-- Input box with watermark -->
+                <Grid Grid.Column="0">
+                    <TextBox Name="InputBox"
+                             Style="{StaticResource CodexInputStyle}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             PreviewKeyDown="OnInputPreviewKeyDown"
+                             KeyboardNavigation.TabIndex="2"
+                             AutomationProperties.Name="Chat message input" />
+                    <TextBlock Text="Type a message..."
+                               IsHitTestVisible="False"
                                VerticalAlignment="Center"
-                               Margin="0,0,8,0"
-                               Visibility="Collapsed"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <TextBlock Name="TelemetryText"
-                               VerticalAlignment="Center"
-                               Margin="0,0,8,0"
-                               Visibility="Collapsed"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
-                               AutomationProperties.Name="Session telemetry" />
-                    <ProgressBar Name="StreamingIndicator"
-                                 Width="80"
-                                 Height="6"
-                                 Margin="0,0,8,0"
-                                 IsIndeterminate="True"
-                                 Visibility="Collapsed"
-                                 AutomationProperties.Name="Streaming in progress indicator" />
-                    <TextBlock Name="StatusText"
-                               VerticalAlignment="Center"
-                               Margin="0,0,8,0"
-                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}" />
-                    <Button Name="SendButton"
-                            Width="80"
-                            Height="28"
-                            Margin="4,0,0,0"
-                            KeyboardNavigation.TabIndex="3"
-                            AutomationProperties.Name="Send message"
-                            Click="OnSendClick">
-                        <AccessText Text="_Send" />
-                    </Button>
-                </StackPanel>
-                <TextBox Name="InputBox"
-                         AcceptsReturn="True"
-                         MinHeight="60"
-                         TextWrapping="Wrap"
-                         PreviewKeyDown="OnInputPreviewKeyDown"
-                         Background="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBackgroundKey}}"
-                         Foreground="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowTextKey}}"
-                         KeyboardNavigation.TabIndex="2"
-                         AutomationProperties.Name="Chat message input"
-                         BorderBrush="{DynamicResource {x:Static vsfx:VsBrushes.ToolWindowBorderKey}}" />
-            </DockPanel>
+                               Margin="10,0,0,0"
+                               Foreground="{DynamicResource {x:Static vsfx:VsBrushes.GrayTextKey}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=InputBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+
+                <Button Grid.Column="1"
+                        Name="SendButton"
+                        Style="{StaticResource CodexAccentButtonStyle}"
+                        Padding="14,6"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Stretch"
+                        KeyboardNavigation.TabIndex="3"
+                        AutomationProperties.Name="Send message"
+                        Click="OnSendClick">
+                    <AccessText Text="_Send" />
+                </Button>
+            </Grid>
+
+            <!-- Status line -->
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        Margin="2,4,2,0">
+                <TextBlock Name="StatusText"
+                           Style="{StaticResource CodexSecondaryStyle}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <TextBlock Name="TokenUsageText"
+                           Style="{StaticResource CodexSecondaryStyle}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"
+                           Visibility="Collapsed" />
+                <TextBlock Name="TelemetryText"
+                           Style="{StaticResource CodexSecondaryStyle}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"
+                           Visibility="Collapsed"
+                           AutomationProperties.Name="Session telemetry" />
+            </StackPanel>
         </Grid>
     </Grid>
 </UserControl>

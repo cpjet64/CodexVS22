@@ -5,6 +5,11 @@ global using Task = System.Threading.Tasks.Task;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Collections.Generic;
+using CodexVS22.Core.Cli;
+using CodexVS22.Core.State;
+using CodexVS22.Shared.Cli;
+using CodexVS22.Shared.Options;
+using CodexVS22.Shared.Utilities;
 
 namespace CodexVS22
 {
@@ -19,6 +24,8 @@ namespace CodexVS22
         public static CodexOptions OptionsInstance { get; private set; }
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
+            ConfigureServices();
+
             await this.RegisterCommandsAsync();
 
             this.RegisterToolWindows();
@@ -45,6 +52,36 @@ namespace CodexVS22
                     // ignore failures opening the tool window on startup
                 }
             }
+        }
+
+        private static void ConfigureServices()
+        {
+            ServiceLocator.RegisterSingleton<ICliDiagnosticsSink>(() => new DiagnosticsPaneCliDiagnosticsSink());
+            ServiceLocator.RegisterSingleton<ICliMessageSerializer>(() => new CliSubmissionFactory());
+            ServiceLocator.RegisterSingleton<ICliMessageRouter>(() => new DefaultCliMessageRouter());
+            ServiceLocator.RegisterSingleton<ICodexOptionsProvider>(() => new DefaultCodexOptionsProvider());
+            ServiceLocator.RegisterSingleton<ICodexCliHost>(() => new ProcessCodexCliHost(ServiceLocator.GetRequiredService<ICliDiagnosticsSink>()));
+            ServiceLocator.RegisterSingleton(() => new CliSessionService(
+                ServiceLocator.GetRequiredService<ICodexCliHost>(),
+                ServiceLocator.GetRequiredService<ICliMessageRouter>(),
+                ServiceLocator.GetRequiredService<ICliMessageSerializer>(),
+                ServiceLocator.GetRequiredService<ICodexOptionsProvider>()));
+            ServiceLocator.RegisterSingleton<ICodexSessionStore>(() => new CodexSessionStore());
+            ServiceLocator.RegisterSingleton<IWorkspaceContextStore>(() => new WorkspaceContextStore());
+            ServiceLocator.RegisterSingleton<IOptionsCache>(() => new OptionsCache());
+            ServiceLocator.RegisterSingleton<ICodexSessionCoordinator>(() =>
+            {
+                var coordinator = new CodexSessionCoordinator(
+                    ServiceLocator.GetRequiredService<ICodexCliHost>(),
+                    ServiceLocator.GetRequiredService<CliSessionService>(),
+                    ServiceLocator.GetRequiredService<ICliMessageRouter>(),
+                    ServiceLocator.GetRequiredService<ICodexOptionsProvider>(),
+                    ServiceLocator.GetRequiredService<ICodexSessionStore>(),
+                    ServiceLocator.GetRequiredService<IWorkspaceContextStore>(),
+                    ServiceLocator.GetRequiredService<IOptionsCache>());
+                coordinator.Initialize();
+                return coordinator;
+            });
         }
 
         private async Task InitializeEnvironmentAsync(CancellationToken cancellationToken)

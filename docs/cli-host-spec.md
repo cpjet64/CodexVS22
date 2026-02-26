@@ -101,3 +101,10 @@ Move the following into `CodexVS22.Core.Cli` namespace:
 - Error propagation strategy → Section 9.
 - Options integration and host factory → Section 6.
 - Specification deliverable (this document).
+
+## Implementation Notes
+- Introduced `Shared/Cli` abstractions (host contracts, diagnostics sink, serializer, options provider) and `Core/Cli` implementations (`ProcessCodexCliHost`, `CliSessionService`, default router/sinks).
+- Legacy `CodexCliHost` now adapts to the new service while keeping existing tool window code functional.
+- Serialization helpers (`CreateUserInputSubmission`, exec cancel, heartbeat) now live in `CliSubmissionFactory`; tool window methods forward to the factory.
+- Heartbeat parsing uses `CliHeartbeatHelper` and emits `CliHeartbeatTemplate` consumed by new host/session services.
+- Added unit tests covering session routing, heartbeat negotiation, and diagnostics fan-out in `CodexVS22.Tests/CliSessionServiceTests.cs`.
