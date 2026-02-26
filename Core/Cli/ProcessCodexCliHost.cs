@@ -456,13 +456,13 @@ namespace CodexVS22.Core.Cli
 
             if (useWsl)
             {
-                return ("wsl.exe", "-- codex proto");
+                return ("wsl.exe", "-- codex app-server");
             }
             if (!string.IsNullOrEmpty(exe))
             {
-                return (exe, "proto");
+                return (exe, "app-server");
             }
-            return ("codex", "proto");
+            return ("codex", "app-server");
         }
 
         private static (string fileName, string args) ResolveCodexCommand(CodexOptions options, string subcommand, string workingDir)
