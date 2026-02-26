@@ -21,4 +21,4 @@ test:
     & "C:\Users\curtp\.codex\scripts\ensure-vcvars.ps1" -Quiet; dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj -c Release
 
 package-check:
-    powershell -NoLogo -Command "$$vsix = Get-ChildItem -Recurse -Filter *.vsix | Select-Object -First 1; if (-not $$vsix) { throw 'VSIX not found after build.' }"
+    powershell -NoLogo -Command "if (-not (Get-ChildItem -Recurse -Filter *.vsix | Select-Object -First 1)) { throw 'VSIX not found after build.' }"
