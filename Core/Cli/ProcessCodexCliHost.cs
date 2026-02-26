@@ -31,6 +31,8 @@ namespace CodexVS22.Core.Cli
         private string _connectWorkingDirectory = string.Empty;
         private long _rpcCounter;
         private bool _threadStartRequested;
+        private bool _turnInProgress;
+        private string _activeTurnId = string.Empty;
         private readonly Queue<string> _pendingUserInputs = new();
         private readonly ConcurrentDictionary<string, string> _pendingRequestKinds = new(StringComparer.Ordinal);
         private readonly ConcurrentDictionary<string, string> _approvalRequestByCallId = new(StringComparer.Ordinal);
@@ -108,6 +110,8 @@ namespace CodexVS22.Core.Cli
                 _connectWorkingDirectory = resolvedWorkingDir;
                 _activeThreadId = string.Empty;
                 _threadStartRequested = false;
+                _turnInProgress = false;
+                _activeTurnId = string.Empty;
                 lock (_gate)
                 {
                     _pendingUserInputs.Clear();
@@ -507,7 +511,7 @@ namespace CodexVS22.Core.Cli
 
             await SendRpcRequestAsync("initialize", initializeParams, "initialize", cancellationToken).ConfigureAwait(false);
             await SendRpcNotificationAsync("initialized", new JObject(), cancellationToken).ConfigureAwait(false);
-            await RequestThreadStartAsync(request.Options, workingDir, cancellationToken).ConfigureAwait(false);
+            await RecoverOrStartThreadAsync(request.Options, workingDir, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task<bool> SendUserInputViaAppServerAsync(JObject op, CancellationToken cancellationToken)
@@ -524,8 +528,13 @@ namespace CodexVS22.Core.Cli
                 }
 
                 var request = _currentRequest ?? new CliConnectionRequest(CodexVS22Package.OptionsInstance ?? new CodexOptions(), _connectWorkingDirectory);
-                await RequestThreadStartAsync(request.Options, ResolveWorkingDirectory(request.WorkingDirectory), cancellationToken).ConfigureAwait(false);
+                await RecoverOrStartThreadAsync(request.Options, ResolveWorkingDirectory(request.WorkingDirectory), cancellationToken).ConfigureAwait(false);
                 return true;
+            }
+
+            if (_turnInProgress)
+            {
+                return await SendTurnSteerAsync(text, cancellationToken).ConfigureAwait(false);
             }
 
             return await SendTurnStartAsync(text, cancellationToken).ConfigureAwait(false);
@@ -596,6 +605,39 @@ namespace CodexVS22.Core.Cli
             };
 
             return await SendRpcRequestAsync("turn/start", parameters, "turn-start", cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<bool> SendTurnSteerAsync(string text, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(_activeThreadId))
+                return false;
+
+            var parameters = new JObject
+            {
+                ["threadId"] = _activeThreadId,
+                ["input"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = text ?? string.Empty
+                    }
+                }
+            };
+
+            if (!string.IsNullOrWhiteSpace(_activeTurnId))
+                parameters["turnId"] = _activeTurnId;
+
+            return await SendRpcRequestAsync("turn/steer", parameters, "turn-steer", cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task RecoverOrStartThreadAsync(CodexOptions options, string workingDir, CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(_activeThreadId) || _threadStartRequested)
+                return;
+
+            _threadStartRequested = true;
+            await SendRpcRequestAsync("thread/list", BuildThreadListParams(workingDir), "thread-list", cancellationToken).ConfigureAwait(false);
         }
 
         private async Task RequestThreadStartAsync(CodexOptions options, string workingDir, CancellationToken cancellationToken)
@@ -687,6 +729,20 @@ namespace CodexVS22.Core.Cli
 
             if (!string.IsNullOrWhiteSpace(requestId) && error != null)
             {
+                if (_pendingRequestKinds.TryRemove(requestId, out var failedKind))
+                {
+                    if (string.Equals(failedKind, "thread-list", StringComparison.Ordinal))
+                    {
+                        var request = _currentRequest ?? new CliConnectionRequest(CodexVS22Package.OptionsInstance ?? new CodexOptions(), _connectWorkingDirectory);
+                        _ = RequestThreadStartAsync(request.Options, ResolveWorkingDirectory(request.WorkingDirectory), CancellationToken.None);
+                    }
+                    else if (string.Equals(failedKind, "thread-start", StringComparison.Ordinal) ||
+                             string.Equals(failedKind, "thread-resume", StringComparison.Ordinal))
+                    {
+                        _threadStartRequested = false;
+                    }
+                }
+
                 var message = error.Value<string>("message") ?? "App Server request failed.";
                 yield return CreateLegacyEvent("stream_error", new JObject
                 {
@@ -712,6 +768,22 @@ namespace CodexVS22.Core.Cli
             {
                 switch (kind)
                 {
+                    case "thread-list":
+                        var existingThreadId = result.SelectToken("data[0].id")?.ToString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(existingThreadId))
+                        {
+                            _ = SendRpcRequestAsync("thread/resume", new JObject
+                            {
+                                ["threadId"] = existingThreadId
+                            }, "thread-resume", CancellationToken.None);
+                        }
+                        else
+                        {
+                            var request = _currentRequest ?? new CliConnectionRequest(CodexVS22Package.OptionsInstance ?? new CodexOptions(), _connectWorkingDirectory);
+                            _ = RequestThreadStartAsync(request.Options, ResolveWorkingDirectory(request.WorkingDirectory), CancellationToken.None);
+                        }
+                        yield break;
+                    case "thread-resume":
                     case "thread-start":
                         var threadId = result.SelectToken("thread.id")?.ToString() ?? string.Empty;
                         if (!string.IsNullOrWhiteSpace(threadId))
@@ -720,6 +792,15 @@ namespace CodexVS22.Core.Cli
                             _threadStartRequested = false;
                             yield return CreateSessionConfiguredEvent(threadId);
                             _ = Task.Run(() => FlushPendingUserInputsAsync(CancellationToken.None), CancellationToken.None);
+                        }
+                        yield break;
+                    case "turn-start":
+                    case "turn-steer":
+                        var turnId = result.SelectToken("turn.id")?.ToString() ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(turnId))
+                        {
+                            _activeTurnId = turnId;
+                            _turnInProgress = true;
                         }
                         yield break;
                     case "mcp-list":
@@ -843,8 +924,15 @@ namespace CodexVS22.Core.Cli
                         ["diff"] = parameters["diff"] ?? string.Empty
                     });
                     yield break;
+                case "turn/started":
+                    var startedTurn = parameters["turn"] as JObject;
+                    _activeTurnId = startedTurn?.Value<string>("id") ?? parameters.Value<string>("turnId") ?? string.Empty;
+                    _turnInProgress = true;
+                    yield break;
                 case "turn/completed":
                     var turn = parameters["turn"] as JObject;
+                    _activeTurnId = turn?.Value<string>("id") ?? parameters.Value<string>("turnId") ?? _activeTurnId;
+                    _turnInProgress = false;
                     yield return CreateLegacyEvent("task_complete", new JObject
                     {
                         ["id"] = turn?.Value<string>("id") ?? parameters.Value<string>("turnId") ?? string.Empty,
@@ -936,6 +1024,19 @@ namespace CodexVS22.Core.Cli
             {
                 ["cwds"] = new JArray(cwd),
                 ["forceReload"] = true
+            };
+        }
+
+        private JObject BuildThreadListParams(string workingDir)
+        {
+            var cwd = ResolveWorkingDirectory(workingDir);
+            return new JObject
+            {
+                ["limit"] = 1,
+                ["sortKey"] = "updated_at",
+                ["cwd"] = cwd,
+                ["archived"] = false,
+                ["sourceKinds"] = new JArray("appServer", "vscode", "cli")
             };
         }
 

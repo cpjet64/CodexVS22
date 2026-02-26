@@ -32,7 +32,7 @@ namespace CodexVS22
 
         [Category("Codex")]
         [DisplayName("Use WSL")]
-        [Description("Run 'codex proto' via WSL if native Windows is unstable.")]
+        [Description("Run 'codex app-server' via WSL if native Windows is unstable.")]
         public bool UseWsl { get; set; } = false;
 
         [Category("Codex")]
