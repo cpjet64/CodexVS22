@@ -60,6 +60,9 @@ internal static partial class Program
         RunTest(nameof(SessionCoordinator_TracksHostStateAndResetsOnOptionChange), SessionCoordinator_TracksHostStateAndResetsOnOptionChange);
         RunTest(nameof(WorkspaceContextStore_NormalizesPathsAndRaisesEvents), WorkspaceContextStore_NormalizesPathsAndRaisesEvents);
         RunTest(nameof(OptionsCache_DerivesEffectiveValues), OptionsCache_DerivesEffectiveValues);
+        RunTest(nameof(ChatTranscriptReducer_FinalizesStreamingTurn), ChatTranscriptReducer_FinalizesStreamingTurn);
+        RunTest(nameof(ApprovalService_QueuesAndResolvesInOrder), ApprovalService_QueuesAndResolvesInOrder);
+        RunTest(nameof(ApprovalService_RememberedDecisionSkipsQueue), ApprovalService_RememberedDecisionSkipsQueue);
 
     WriteArtifacts();
 

@@ -26,3 +26,20 @@
   - Verified rebuild remains successful after warning-pass changes.
 - Refactor status update:
   - Marked `R2` complete in `todo-refactor.md` and synchronized `MASTER-CHECKLIST.md`.
+
+## 2026-02-26 (R4/R8 Foundation Slice)
+- Implemented first non-placeholder module slice for `R4` and `R8`:
+  - Added chat domain/reducer primitives: `Core/Chat/ChatModels.cs`, `Core/Chat/ChatTranscriptReducer.cs`.
+  - Added approvals service layer: `Core/Approvals/ApprovalModels.cs`, `Core/Approvals/ApprovalMemoryStore.cs`, `Core/Approvals/ApprovalService.cs`, `Shared/Approvals/IApprovalService.cs`.
+  - Replaced scaffold-only view-model logic with service-backed behavior:
+    - `ToolWindows/CodexToolWindow/ViewModels/ChatTranscriptViewModel.cs`
+    - `ToolWindows/CodexToolWindow/ViewModels/ApprovalsBannerViewModel.cs`
+- Test coverage additions:
+  - Added `CodexVS22.Tests/ChatApprovalsModuleTests.cs` and registered tests in `CodexVS22.Tests/Program.cs`.
+  - Extended `CodexVS22.Tests/CodexVS22.Tests.csproj` to include new linked core/shared module files.
+- Build wiring:
+  - Extended `CodexVS22.csproj` compile includes for new chat/approvals files.
+- Verification:
+  - `& "C:\Users\curtp\.codex\scripts\ensure-vcvars.ps1" -Quiet; dotnet run --project CodexVS22.Tests/CodexVS22.Tests.csproj -c Release` -> passed (`Correlation tests passed.`).
+- Status note:
+  - This closes placeholder scaffolding for core `R4`/`R8` primitives but does not yet complete all `R4`/`R8` acceptance criteria in `todo-refactor.md`.

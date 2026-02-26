@@ -22,6 +22,12 @@
     <Compile Include="..\Core\DiagnosticsBuffer.cs" Link="Core\DiagnosticsBuffer.cs" />
     <Compile Include="..\Core\HealthMetrics.cs" Link="Core\HealthMetrics.cs" />
     <Compile Include="..\Core\StatusBarHealthModel.cs" Link="Core\StatusBarHealthModel.cs" />
+    <Compile Include="..\Core\Approvals\ApprovalMemoryStore.cs" Link="Core\Approvals\ApprovalMemoryStore.cs" />
+    <Compile Include="..\Core\Approvals\ApprovalModels.cs" Link="Core\Approvals\ApprovalModels.cs" />
+    <Compile Include="..\Core\Approvals\ApprovalService.cs" Link="Core\Approvals\ApprovalService.cs" />
+    <Compile Include="..\Core\Chat\ChatModels.cs" Link="Core\Chat\ChatModels.cs" />
+    <Compile Include="..\Core\Chat\ChatTranscriptReducer.cs" Link="Core\Chat\ChatTranscriptReducer.cs" />
+    <Compile Include="..\Shared\Approvals\IApprovalService.cs" Link="Shared\IApprovalService.cs" />
     <Compile Include="..\Shared\Cli\CliContracts.cs" Link="Shared\CliContracts.cs" />
     <Compile Include="..\Shared\Cli\CliHeartbeatHelper.cs" Link="Shared\CliHeartbeatHelper.cs" />
     <Compile Include="..\Shared\Cli\CliJsonUtilities.cs" Link="Shared\CliJsonUtilities.cs" />

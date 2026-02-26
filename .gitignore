@@ -364,6 +364,8 @@ FodyWeavers.xsd
 
 # Local automation/worktree artifacts
 .worktrees/
+.agent-state/
+.agent-logs/
 coverage.lcov
 junit.xml
 perf.csv

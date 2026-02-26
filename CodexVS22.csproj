@@ -907,11 +907,17 @@
 
 
   <ItemGroup>
+    <Compile Include="Core\Approvals\ApprovalMemoryStore.cs" />
+    <Compile Include="Core\Approvals\ApprovalModels.cs" />
+    <Compile Include="Core\Approvals\ApprovalService.cs" />
+    <Compile Include="Core\Chat\ChatModels.cs" />
+    <Compile Include="Core\Chat\ChatTranscriptReducer.cs" />
     <Compile Include="Core\Cli\CliSessionService.cs" />
     <Compile Include="Core\Cli\DefaultCliMessageRouter.cs" />
     <Compile Include="Core\Cli\DefaultCodexOptionsProvider.cs" />
     <Compile Include="Core\Cli\DiagnosticsPaneCliDiagnosticsSink.cs" />
     <Compile Include="Core\Cli\ProcessCodexCliHost.cs" />
+    <Compile Include="Shared\Approvals\IApprovalService.cs" />
     <Compile Include="Shared\Cli\CliContracts.cs" />
     <Compile Include="Shared\Cli\CliHeartbeatHelper.cs" />
     <Compile Include="Shared\Cli\CliJsonUtilities.cs" />
